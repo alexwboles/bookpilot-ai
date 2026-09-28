@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BookPilot AI — Online booking for local service businesses</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header>
+  <h1>BookPilot <span>AI</span></h1>
+  <p>Online booking for local service businesses. No accounts, no monthly fees — your calendar lives in your browser.</p>
+</header>
+
+<div class="wrap">
+  <div class="row" style="margin-bottom:16px">
+    <div>
+      <label for="bizName">Business name</label>
+      <input type="text" id="bizName" placeholder="e.g. Main Street Salon">
+    </div>
+    <div style="display:flex;align-items:end;gap:8px">
+      <button class="ghost" id="resetDemo">Load demo data</button>
+      <button class="danger" id="wipeAll">Erase everything</button>
+    </div>
+  </div>
+
+  <div class="tabs" id="mainTabs">
+    <button data-tab="book" class="active">Book online</button>
+    <button data-tab="bookings">Bookings</button>
+    <button data-tab="services">Services</button>
+    <button data-tab="hours">Hours &amp; blocked dates</button>
+    <button data-tab="widget">Embed widget</button>
+  </div>
+
+  <!-- Customer booking view (also used standalone via ?embed=1) -->
+  <div class="tab active" id="tab-book">
+    <div class="card">
+      <h2>Book an appointment</h2>
+      <p class="sub">Pick a service, choose a day, grab a time. Instant confirmation — no phone tag.</p>
+      <div class="row">
+        <div>
+          <label for="bkService">Service</label>
+          <select id="bkService"></select>
+        </div>
+        <div>
+          <label for="bkDate">Date</label>
+          <input type="date" id="bkDate">
+        </div>
+      </div>
+      <div id="slotWrap" style="margin-top:14px"></div>
+      <div id="bkForm" style="display:none;margin-top:14px">
+        <div class="row">
+          <div><label for="bkName">Your name</label><input type="text" id="bkName" placeholder="Jane Doe"></div>
+          <div><label for="bkPhone">Phone</label><input type="tel" id="bkPhone" placeholder="555-123-4567"></div>
+        </div>
+        <div style="margin-top:10px"><label for="bkNotes">Notes (optional)</label><input type="text" id="bkNotes" placeholder="Anything we should know?"></div>
+        <div style="margin-top:12px"><button class="primary" id="bkConfirm">Confirm booking</button></div>
+      </div>
+      <div id="bkResult" style="margin-top:14px"></div>
+    </div>
+  </div>
+
+  <!-- Owner bookings view -->
+  <div class="tab" id="tab-bookings">
+    <div class="card">
+      <h2>Upcoming bookings</h2>
+      <p class="sub">Confirm, complete, or mark no-shows. Day-before reminders keep chairs filled.</p>
+      <div id="remindBox"></div>
+      <div class="toolbar">
+        <div><label for="fltStatus">Filter</label>
+          <select id="fltStatus">
+            <option value="upcoming">Upcoming</option>
+            <option value="all">All</option>
+            <option value="confirmed">Confirmed</option>
+            <option value="completed">Completed</option>
+            <option value="no-show">No-shows</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </div>
+      </div>
+      <div id="bookingsTable"></div>
+    </div>
+    <div class="card">
+      <h2>Stats</h2>
+      <p class="sub">No-show rate is the number to watch — reminders are the cheapest fix.</p>
+      <div class="row" id="statsRow"></div>
+    </div>
+  </div>
+
+  <!-- Services -->
+  <div class="tab" id="tab-services">
+    <div class="card">
+      <h2>Service menu</h2>
+      <p class="sub">What customers can book. Duration drives the slot grid; price feeds your revenue stats.</p>
+      <div id="serviceList"></div>
+      <h3 style="margin-top:18px">Add a service</h3>
+      <div class="row">
+        <div><label for="svcName">Name</label><input type="text" id="svcName" placeholder="e.g. Beard trim"></div>
+        <div><label for="svcDur">Duration (minutes)</label><input type="number" id="svcDur" value="30" min="5" max="480"></div>
+        <div><label for="svcPrice">Price ($)</label><input type="number" id="svcPrice" value="25" min="0" step="1"></div>
+      </div>
+      <div style="margin-top:10px"><button class="primary" id="svcAdd">Add service</button></div>
+    </div>
+  </div>
+
+  <!-- Hours & blocked -->
+  <div class="tab" id="tab-hours">
+    <div class="card">
+      <h2>Working hours</h2>
+      <p class="sub">Untick a day to close it. Slots are generated from these hours automatically.</p>
+      <div class="hoursgrid" id="hoursGrid"></div>
+      <div style="margin-top:12px"><button class="primary" id="hoursSave">Save hours</button></div>
+    </div>
+    <div class="card">
+      <h2>Blocked dates</h2>
+      <p class="sub">Holidays, vacations, training days — no slots are offered on blocked dates.</p>
+      <div class="row">
+        <div><label for="blkDate">Date</label><input type="date" id="blkDate"></div>
+        <div><label for="blkNote">Note</label><input type="text" id="blkNote" placeholder="e.g. Thanksgiving"></div>
+        <div style="display:flex;align-items:end"><button class="primary" id="blkAdd">Block date</button></div>
+      </div>
+      <div id="blkList" style="margin-top:12px"></div>
+    </div>
+  </div>
+
+  <!-- Embed widget -->
+  <div class="tab" id="tab-widget">
+    <div class="card">
+      <h2>Embed on your website</h2>
+      <p class="sub">Paste this snippet anywhere on your site and customers can book without leaving the page. It opens this same booking view.</p>
+      <div class="row">
+        <div><label for="embService">Limit to one service (optional)</label><select id="embService"><option value="">All services</option></select></div>
+        <div><label for="embUrl">Page URL where this file is hosted</label><input type="text" id="embUrl" placeholder="https://yoursite.com/bookpilot/"></div>
+      </div>
+      <div style="margin-top:10px"><button class="primary" id="embGen">Generate snippet</button></div>
+      <pre class="embed" id="embOut" style="margin-top:12px;display:none"></pre>
+      <p class="muted" style="margin-top:10px">Tip: append <code>?embed=1</code> to the page URL to show only the booking widget (no owner tabs) — perfect inside the iframe above.</p>
+    </div>
+  </div>
+</div>
+
+<script src="js/logic.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
