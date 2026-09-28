@@ -65,6 +65,17 @@
     showTab('book');
   }
 
+  // ---------- booking step rail ----------
+  function setStep(n) {
+    var rail = $('bookSteps');
+    if (!rail) return;
+    rail.querySelectorAll('.step').forEach(function (li) {
+      var s = parseInt(li.dataset.step, 10);
+      li.classList.toggle('active', s === n);
+      li.classList.toggle('done', s < n);
+    });
+  }
+
   // ---------- services ----------
   function serviceOptions(sel, includeAll) {
     var html = includeAll ? '<option value="">All services</option>' : '';
@@ -74,9 +85,28 @@
     sel.innerHTML = html;
   }
 
+  function renderSvcCards() {
+    var host = $('svcCards');
+    if (!host) return;
+    var cur = $('bkService').value;
+    host.innerHTML = state.services.map(function (s) {
+      return '<button type="button" class="svc-card' + (s.id === cur ? ' sel' : '') + '" data-svc="' + esc(s.id) + '">' +
+        '<span class="svc-name">' + esc(s.name) + '</span>' +
+        '<span class="svc-meta">' + s.durationMin + ' min · $' + s.price + '</span></button>';
+    }).join('') || '<p class="muted">No services yet.</p>';
+    host.querySelectorAll('[data-svc]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        $('bkService').value = btn.dataset.svc;
+        renderSvcCards();
+        renderBookingForm();
+      });
+    });
+  }
+
   function renderServices() {
     serviceOptions($('bkService'), false);
     serviceOptions($('embService'), true);
+    renderSvcCards();
     var html = '<table><tr><th>Service</th><th>Duration</th><th>Price</th><th></th></tr>';
     state.services.forEach(function (s) {
       html += '<tr><td>' + esc(s.name) + '</td><td>' + s.durationMin + ' min</td><td>$' + s.price +
@@ -195,17 +225,18 @@
     var wrap = $('slotWrap');
     $('bkForm').style.display = 'none';
     selSlot = null;
-    if (!svc) { wrap.innerHTML = '<p class="muted">Add a service first (Services tab).</p>'; return; }
-    if (!date) { wrap.innerHTML = '<p class="muted">Pick a date to see available times.</p>'; return; }
-    if (B.isBlocked(date, blockedDateList())) { wrap.innerHTML = '<div class="warnbox">That date is blocked — please pick another day.</div>'; return; }
+    if (!svc) { wrap.innerHTML = '<p class="muted">Add a service first (Services tab).</p>'; setStep(1); return; }
+    if (!date) { wrap.innerHTML = '<p class="muted">Pick a date to see available times.</p>'; setStep(1); return; }
+    if (B.isBlocked(date, blockedDateList())) { wrap.innerHTML = '<div class="warnbox">That date is blocked — please pick another day.</div>'; setStep(2); return; }
     var slots = B.slotsFor(date, svc, state.hours, blockedDateList(), state.bookings,
-      { today: B.todayStr(), nowMin: 24 * 60 });
-    if (!slots.length) { wrap.innerHTML = '<div class="warnbox">No availability on ' + esc(B.fmtDate(date)) + ' — try another day.</div>'; return; }
-    var html = '<label>Available times — ' + esc(B.fmtDate(date)) + '</label><div class="slotgrid">';
+      { today: B.todayStr() });
+    if (!slots.length) { wrap.innerHTML = '<div class="warnbox">No availability on ' + esc(B.fmtDate(date)) + ' — try another day.</div>'; setStep(2); return; }
+    var html = '<div class="slot-label">Available times — ' + esc(B.fmtDate(date)) + '</div><div class="slotgrid">';
     slots.forEach(function (t) {
       html += '<button data-slot="' + t + '">' + B.fmtTime(t) + '</button>';
     });
     wrap.innerHTML = html + '</div>';
+    setStep(2);
     wrap.querySelectorAll('[data-slot]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         wrap.querySelectorAll('[data-slot]').forEach(function (x) { x.classList.remove('sel'); });
@@ -213,11 +244,12 @@
         selSlot = parseInt(btn.dataset.slot, 10);
         $('bkForm').style.display = 'block';
         $('bkResult').innerHTML = '';
+        setStep(3);
       });
     });
   }
 
-  $('bkService').addEventListener('change', renderBookingForm);
+  $('bkService').addEventListener('change', function () { renderSvcCards(); renderBookingForm(); });
   $('bkDate').addEventListener('change', renderBookingForm);
 
   $('bkConfirm').addEventListener('click', function () {
@@ -238,6 +270,7 @@
       '. We\'ll see you then, ' + esc(b.name.split(' ')[0]) + '.</div>';
     $('bkForm').style.display = 'none';
     $('bkName').value = ''; $('bkPhone').value = ''; $('bkNotes').value = '';
+    renderSvcCards();
     renderBookingForm(); renderBookings(); renderStats();
   });
 

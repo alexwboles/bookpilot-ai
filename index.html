@@ -4,102 +4,139 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>BookPilot AI — Online booking for local service businesses</title>
+<meta name="description" content="Free local-first booking widget for service businesses: service menu, smart availability, reminders, no-show tracking, embeddable on your own site.">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<header>
-  <h1>BookPilot <span>AI</span></h1>
-  <p>Online booking for local service businesses. No accounts, no monthly fees — your calendar lives in your browser.</p>
+
+<header class="masthead">
+  <div class="mast-inner">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M8 2.5v4M16 2.5v4M3 10h18"/><circle cx="12" cy="15" r="2.2" fill="currentColor" stroke="none"/></svg>
+      </span>
+      <span class="brand-name">BookPilot <em>AI</em></span>
+    </div>
+    <div class="mast-biz">
+      <label class="sr" for="bizName">Business name</label>
+      <input type="text" id="bizName" placeholder="Your business name" maxlength="60" autocomplete="off">
+    </div>
+    <div class="mast-actions">
+      <button class="btn ghost" id="resetDemo">Load demo data</button>
+      <button class="btn danger" id="wipeAll">Erase everything</button>
+    </div>
+  </div>
+  <p class="mast-sub">Online booking for local service businesses. No accounts, no monthly fees — your calendar lives in your browser.</p>
 </header>
 
 <div class="wrap">
-  <div class="row" style="margin-bottom:16px">
-    <div>
-      <label for="bizName">Business name</label>
-      <input type="text" id="bizName" placeholder="e.g. Main Street Salon">
-    </div>
-    <div style="display:flex;align-items:end;gap:8px">
-      <button class="ghost" id="resetDemo">Load demo data</button>
-      <button class="danger" id="wipeAll">Erase everything</button>
-    </div>
-  </div>
 
-  <div class="tabs" id="mainTabs">
-    <button data-tab="book" class="active">Book online</button>
-    <button data-tab="bookings">Bookings</button>
-    <button data-tab="services">Services</button>
-    <button data-tab="hours">Hours &amp; blocked dates</button>
-    <button data-tab="widget">Embed widget</button>
-  </div>
+  <nav class="tabs" id="mainTabs" aria-label="Sections">
+    <button data-tab="book" class="active"><span class="tab-ic" aria-hidden="true">◷</span>Book online</button>
+    <button data-tab="bookings"><span class="tab-ic" aria-hidden="true">▤</span>Bookings</button>
+    <button data-tab="services"><span class="tab-ic" aria-hidden="true">✂</span>Services</button>
+    <button data-tab="hours"><span class="tab-ic" aria-hidden="true">◐</span>Hours &amp; blocked dates</button>
+    <button data-tab="widget"><span class="tab-ic" aria-hidden="true">⧉</span>Embed widget</button>
+  </nav>
 
   <!-- Customer booking view (also used standalone via ?embed=1) -->
   <div class="tab active" id="tab-book">
-    <div class="card">
-      <h2>Book an appointment</h2>
-      <p class="sub">Pick a service, choose a day, grab a time. Instant confirmation — no phone tag.</p>
-      <div class="row">
+    <div class="card book-card">
+      <div class="book-head">
         <div>
+          <h2>Book an appointment</h2>
+          <p class="sub">Three steps, under a minute. Instant confirmation — no phone tag.</p>
+        </div>
+        <ol class="steps" id="bookSteps" aria-hidden="true">
+          <li class="step" data-step="1"><span class="step-n">1</span><span class="step-t">Service</span></li>
+          <li class="step" data-step="2"><span class="step-n">2</span><span class="step-t">Day &amp; time</span></li>
+          <li class="step" data-step="3"><span class="step-n">3</span><span class="step-t">Your details</span></li>
+        </ol>
+      </div>
+
+      <div class="book-grid">
+        <div class="book-col">
           <label for="bkService">Service</label>
           <select id="bkService"></select>
+          <div id="svcCards" class="svc-cards"></div>
+          <div style="margin-top:14px">
+            <label for="bkDate">Date</label>
+            <input type="date" id="bkDate">
+          </div>
         </div>
-        <div>
-          <label for="bkDate">Date</label>
-          <input type="date" id="bkDate">
+        <div class="book-col">
+          <div id="slotWrap" class="slot-panel"></div>
+          <div id="bkForm" style="display:none">
+            <div class="row">
+              <div><label for="bkName">Your name</label><input type="text" id="bkName" placeholder="Jane Doe" autocomplete="name"></div>
+              <div><label for="bkPhone">Phone</label><input type="tel" id="bkPhone" placeholder="555-123-4567" autocomplete="tel"></div>
+            </div>
+            <div style="margin-top:10px"><label for="bkNotes">Notes (optional)</label><input type="text" id="bkNotes" placeholder="Anything we should know?"></div>
+            <div class="confirm-row"><button class="btn primary" id="bkConfirm">Confirm booking</button>
+              <span class="fineprint">You'll get a reminder the day before.</span></div>
+          </div>
+          <div id="bkResult" style="margin-top:14px"></div>
         </div>
       </div>
-      <div id="slotWrap" style="margin-top:14px"></div>
-      <div id="bkForm" style="display:none;margin-top:14px">
-        <div class="row">
-          <div><label for="bkName">Your name</label><input type="text" id="bkName" placeholder="Jane Doe"></div>
-          <div><label for="bkPhone">Phone</label><input type="tel" id="bkPhone" placeholder="555-123-4567"></div>
-        </div>
-        <div style="margin-top:10px"><label for="bkNotes">Notes (optional)</label><input type="text" id="bkNotes" placeholder="Anything we should know?"></div>
-        <div style="margin-top:12px"><button class="primary" id="bkConfirm">Confirm booking</button></div>
-      </div>
-      <div id="bkResult" style="margin-top:14px"></div>
     </div>
   </div>
 
   <!-- Owner bookings view -->
   <div class="tab" id="tab-bookings">
     <div class="card">
-      <h2>Upcoming bookings</h2>
-      <p class="sub">Confirm, complete, or mark no-shows. Day-before reminders keep chairs filled.</p>
+      <div class="card-head">
+        <div>
+          <h2>Tomorrow's book</h2>
+          <p class="sub">Day-before reminders are the cheapest no-show insurance you have.</p>
+        </div>
+      </div>
       <div id="remindBox"></div>
-      <div class="toolbar">
-        <div><label for="fltStatus">Filter</label>
-          <select id="fltStatus">
-            <option value="upcoming">Upcoming</option>
-            <option value="all">All</option>
-            <option value="confirmed">Confirmed</option>
-            <option value="completed">Completed</option>
-            <option value="no-show">No-shows</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <h2>Bookings</h2>
+          <p class="sub">Confirm, complete, or mark no-shows.</p>
+        </div>
+        <div class="toolbar">
+          <div><label for="fltStatus">Filter</label>
+            <select id="fltStatus">
+              <option value="upcoming">Upcoming</option>
+              <option value="all">All</option>
+              <option value="confirmed">Confirmed</option>
+              <option value="completed">Completed</option>
+              <option value="no-show">No-shows</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </div>
         </div>
       </div>
       <div id="bookingsTable"></div>
     </div>
     <div class="card">
-      <h2>Stats</h2>
+      <h2>The numbers</h2>
       <p class="sub">No-show rate is the number to watch — reminders are the cheapest fix.</p>
-      <div class="row" id="statsRow"></div>
+      <div class="stats" id="statsRow"></div>
     </div>
   </div>
 
   <!-- Services -->
   <div class="tab" id="tab-services">
     <div class="card">
-      <h2>Service menu</h2>
-      <p class="sub">What customers can book. Duration drives the slot grid; price feeds your revenue stats.</p>
+      <div class="card-head">
+        <div>
+          <h2>Service menu</h2>
+          <p class="sub">What customers can book. Duration drives the slot grid; price feeds your revenue stats.</p>
+        </div>
+      </div>
       <div id="serviceList"></div>
-      <h3 style="margin-top:18px">Add a service</h3>
+      <h3 class="form-title">Add a service</h3>
       <div class="row">
         <div><label for="svcName">Name</label><input type="text" id="svcName" placeholder="e.g. Beard trim"></div>
         <div><label for="svcDur">Duration (minutes)</label><input type="number" id="svcDur" value="30" min="5" max="480"></div>
         <div><label for="svcPrice">Price ($)</label><input type="number" id="svcPrice" value="25" min="0" step="1"></div>
       </div>
-      <div style="margin-top:10px"><button class="primary" id="svcAdd">Add service</button></div>
+      <div style="margin-top:12px"><button class="btn primary" id="svcAdd">Add service</button></div>
     </div>
   </div>
 
@@ -109,7 +146,7 @@
       <h2>Working hours</h2>
       <p class="sub">Untick a day to close it. Slots are generated from these hours automatically.</p>
       <div class="hoursgrid" id="hoursGrid"></div>
-      <div style="margin-top:12px"><button class="primary" id="hoursSave">Save hours</button></div>
+      <div style="margin-top:14px"><button class="btn primary" id="hoursSave">Save hours</button></div>
     </div>
     <div class="card">
       <h2>Blocked dates</h2>
@@ -117,9 +154,9 @@
       <div class="row">
         <div><label for="blkDate">Date</label><input type="date" id="blkDate"></div>
         <div><label for="blkNote">Note</label><input type="text" id="blkNote" placeholder="e.g. Thanksgiving"></div>
-        <div style="display:flex;align-items:end"><button class="primary" id="blkAdd">Block date</button></div>
+        <div class="blk-btn"><button class="btn primary" id="blkAdd">Block date</button></div>
       </div>
-      <div id="blkList" style="margin-top:12px"></div>
+      <div id="blkList" style="margin-top:14px"></div>
     </div>
   </div>
 
@@ -132,11 +169,15 @@
         <div><label for="embService">Limit to one service (optional)</label><select id="embService"><option value="">All services</option></select></div>
         <div><label for="embUrl">Page URL where this file is hosted</label><input type="text" id="embUrl" placeholder="https://yoursite.com/bookpilot/"></div>
       </div>
-      <div style="margin-top:10px"><button class="primary" id="embGen">Generate snippet</button></div>
-      <pre class="embed" id="embOut" style="margin-top:12px;display:none"></pre>
-      <p class="muted" style="margin-top:10px">Tip: append <code>?embed=1</code> to the page URL to show only the booking widget (no owner tabs) — perfect inside the iframe above.</p>
+      <div style="margin-top:12px"><button class="btn primary" id="embGen">Generate snippet</button></div>
+      <pre class="embed" id="embOut" style="margin-top:14px;display:none"></pre>
+      <p class="muted" style="margin-top:12px">Tip: append <code>?embed=1</code> to the page URL to show only the booking widget (no owner tabs) — perfect inside the iframe above.</p>
     </div>
   </div>
+
+  <footer class="foot">
+    <p>BookPilot AI · free forever for one location · your data never leaves this browser</p>
+  </footer>
 </div>
 
 <script src="js/logic.js"></script>
