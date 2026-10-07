@@ -239,7 +239,7 @@
   // Copy-paste embed snippet for a customer-facing booking widget.
   function embedSnippet(pageUrl, serviceId) {
     var src = pageUrl + (pageUrl.indexOf('?') === -1 ? '?' : '&') + 'embed=1' + (serviceId ? '&service=' + encodeURIComponent(serviceId) : '');
-    return '<iframe src="' + src + '" width="100%" height="640" style="border:0;border-radius:12px" title="Book online"></iframe>';
+    return '<iframe src="' + src + '" width="100%" height="640" style="border:0;border-radius:0" title="Book online"></iframe>';
   }
 
   function reminderMessage(bizName, b) {
