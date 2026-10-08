@@ -271,7 +271,7 @@
     $('bkForm').style.display = 'none';
     $('bkName').value = ''; $('bkPhone').value = ''; $('bkNotes').value = '';
     renderSvcCards();
-    renderBookingForm(); renderBookings(); renderStats();
+    renderBookingForm(); renderBookings(); renderStats(); renderSvcRevenue();
   });
 
   // ---------- owner: bookings ----------
@@ -283,6 +283,13 @@
     });
     if (f === 'upcoming') list = list.filter(function (b) { return b.date >= today && b.status === 'confirmed'; });
     else if (f !== 'all') list = list.filter(function (b) { return b.status === f; });
+    var q = $('fltSearch') ? $('fltSearch').value : '';
+    if (q && q.trim()) {
+      var hits = B.searchBookings({ bookings: list }, q);
+      var hitIds = {};
+      hits.forEach(function (b) { hitIds[b.id] = true; });
+      list = list.filter(function (b) { return hitIds[b.id]; });
+    }
 
     if (!list.length) { $('bookingsTable').innerHTML = '<p class="muted">No bookings here yet.</p>'; }
     else {
@@ -301,7 +308,7 @@
       $('bookingsTable').querySelectorAll('[data-act]').forEach(function (btn) {
         btn.addEventListener('click', function () {
           B.setStatus(state, btn.dataset.id, btn.dataset.act);
-          save(); renderBookings(); renderStats();
+          save(); renderBookings(); renderStats(); renderSvcRevenue();
         });
       });
     }
@@ -341,6 +348,83 @@
   }
 
   $('fltStatus').addEventListener('change', renderBookings);
+  if ($('fltSearch')) {
+    $('fltSearch').addEventListener('input', renderBookings);
+  }
+
+  // ---------- bookings CSV export ----------
+  function downloadCSV(filename, csv) {
+    var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+
+  $('exportCsv').addEventListener('click', function () {
+    var csv = B.bookingsToCSV(state);
+    var fname = 'bookpilot-bookings-' + B.todayStr() + '.csv';
+    downloadCSV(fname, csv);
+  });
+
+  // ---------- revenue by service ----------
+  function renderSvcRevenue() {
+    var host = $('svcRevenue');
+    if (!host) return;
+    var rows = B.revenueByService(state.bookings);
+    if (!rows.length) { host.innerHTML = '<p class="muted">No revenue yet — completed bookings will show here by service.</p>'; return; }
+    var html = '<table><tr><th>Service</th><th>Bookings</th><th>Completed</th><th>Revenue</th></tr>';
+    rows.forEach(function (r) {
+      html += '<tr><td>' + esc(r.service) + '</td><td>' + r.bookings + '</td><td>' + r.completed +
+        '</td><td>' + money(r.revenue) + '</td></tr>';
+    });
+    host.innerHTML = html + '</table>';
+  }
+
+  // ---------- next-available finder ----------
+  $('bkNextAvail').addEventListener('click', function () {
+    var svcId = $('bkService').value;
+    var svc = B.getService(state.services, svcId);
+    if (!svc) { alert('Pick a service first.'); return; }
+    var open = B.nextOpenDates(state, svcId, 1, B.todayStr());
+    if (!open.length) { alert('No availability for ' + svc.name + ' in the next 60 days.'); return; }
+    $('bkDate').value = open[0].date;
+    renderBookingForm();
+  });
+
+  // ---------- customer self-service lookup ----------
+  function renderLookup() {
+    var host = $('lkResults');
+    var phone = $('lkPhone').value;
+    var hits = B.findBookingsByPhone(state, phone);
+    if (!hits.length) {
+      host.innerHTML = '<p class="muted">No upcoming bookings found for that phone number. Check the number and try again.</p>';
+      return;
+    }
+    var html = '<table><tr><th>When</th><th>Service</th><th>Status</th><th></th></tr>';
+    hits.forEach(function (b) {
+      html += '<tr><td>' + esc(B.fmtDate(b.date)) + '<br><span class="muted">' + esc(B.fmtRange(b.start, b.end)) + '</span></td>' +
+        '<td>' + esc(b.serviceName) + '<br><span class="muted">' + esc(b.name) + '</span></td>' +
+        '<td><span class="pill confirmed">confirmed</span></td>' +
+        '<td><button class="danger small" data-selfcancel="' + b.id + '">Cancel booking</button></td></tr>';
+    });
+    host.innerHTML = html + '</table>';
+    host.querySelectorAll('[data-selfcancel]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        if (!confirm('Cancel this booking? The business owner will be notified.')) return;
+        var r = B.cancelBooking(state, btn.dataset.selfcancel);
+        if (!r.ok) { alert(r.error); return; }
+        save();
+        renderLookup();
+        renderBookings(); renderStats(); renderSvcRevenue(); renderBookingForm();
+      });
+    });
+  }
+
+  $('lkFind').addEventListener('click', renderLookup);
+  $('lkPhone').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); renderLookup(); } });
 
   function renderStats() {
     var s = B.stats(state.bookings);
@@ -391,6 +475,7 @@
     renderBlocked();
     renderBookings();
     renderStats();
+    renderSvcRevenue();
     $('bkDate').min = B.todayStr();
     renderBookingForm();
   }

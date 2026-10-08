@@ -62,6 +62,7 @@
           <div style="margin-top:14px">
             <label for="bkDate">Date</label>
             <input type="date" id="bkDate">
+            <button type="button" class="ghost small" id="bkNextAvail" style="margin-top:8px">Find next available →</button>
           </div>
         </div>
         <div class="book-col">
@@ -78,6 +79,20 @@
           <div id="bkResult" style="margin-top:14px"></div>
         </div>
       </div>
+    </div>
+
+    <div class="card" style="margin-top:20px">
+      <div class="card-head">
+        <div>
+          <h2>Find my bookings</h2>
+          <p class="sub">Already booked? Enter the phone number you booked with to see or cancel your upcoming appointments.</p>
+        </div>
+      </div>
+      <div class="row" style="grid-template-columns: 1fr auto; align-items:end">
+        <div><label for="lkPhone">Phone number</label><input type="tel" id="lkPhone" placeholder="555-123-4567" autocomplete="tel"></div>
+        <div><button class="btn ghost" id="lkFind">Look up</button></div>
+      </div>
+      <div id="lkResults" style="margin-top:14px"></div>
     </div>
   </div>
 
@@ -98,7 +113,13 @@
           <h2>Bookings</h2>
           <p class="sub">Confirm, complete, or mark no-shows.</p>
         </div>
+        <div style="display:flex;gap:10px;align-items:center">
+          <button class="btn ghost" id="exportCsv">Export CSV</button>
+        </div>
         <div class="toolbar">
+          <div><label for="fltSearch">Search customers</label>
+            <input type="text" id="fltSearch" placeholder="Name, phone, or service…" autocomplete="off">
+          </div>
           <div><label for="fltStatus">Filter</label>
             <select id="fltStatus">
               <option value="upcoming">Upcoming</option>
@@ -117,6 +138,9 @@
       <h2>The numbers</h2>
       <p class="sub">No-show rate is the number to watch — reminders are the cheapest fix.</p>
       <div class="stats" id="statsRow"></div>
+      <h3 class="form-title">Revenue by service</h3>
+      <p class="sub">Completed bookings, attributed to the service menu.</p>
+      <div id="svcRevenue"></div>
     </div>
   </div>
 

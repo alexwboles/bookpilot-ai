@@ -247,6 +247,75 @@
       ' on ' + fmtDate(b.date) + ' at ' + fmtTime(b.start) + '. Reply to confirm or reschedule. Thanks!';
   }
 
+  function csvEscape(v) {
+    var s = String(v == null ? '' : v);
+    return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+
+  // Full bookings export (owner). Sorted chronologically; CSV-safe escaping.
+  function bookingsToCSV(state) {
+    var header = ['Date', 'Time', 'Customer', 'Phone', 'Service', 'Duration (min)', 'Price', 'Status', 'Notes'];
+    var list = (state.bookings || []).slice().sort(function (a, b) {
+      return (a.date + pad5(a.start)) < (b.date + pad5(b.start)) ? -1 : 1;
+    });
+    var rows = [header];
+    list.forEach(function (b) {
+      rows.push([b.date, fmtRange(b.start, b.end), b.name || '', b.phone || '',
+        b.serviceName || '', b.durationMin || '', b.price || 0, b.status || '', b.notes || '']);
+    });
+    return rows.map(function (r) { return r.map(csvEscape).join(','); }).join('\r\n');
+  }
+
+  function normalizePhone(p) { return String(p || '').replace(/\D/g, ''); }
+
+  // Search across name, service, and (digits of) phone. Returns matching bookings.
+  function searchBookings(state, q) {
+    var s = String(q == null ? '' : q).trim().toLowerCase();
+    if (!s) return (state.bookings || []).slice();
+    var digits = normalizePhone(s);
+    return (state.bookings || []).filter(function (b) {
+      return String(b.name || '').toLowerCase().indexOf(s) !== -1 ||
+        String(b.serviceName || '').toLowerCase().indexOf(s) !== -1 ||
+        (digits.length >= 3 && normalizePhone(b.phone).indexOf(digits) !== -1);
+    });
+  }
+
+  // Revenue attributed per service name, from completed bookings.
+  function revenueByService(bookings) {
+    var out = {};
+    (bookings || []).forEach(function (b) {
+      var key = b.serviceName || 'Unnamed service';
+      var o = out[key] || (out[key] = { service: key, revenue: 0, completed: 0, bookings: 0 });
+      o.bookings++;
+      if (b.status === 'completed') { o.completed++; o.revenue += (b.price || 0); }
+    });
+    return Object.keys(out).map(function (k) { return out[k]; })
+      .sort(function (a, b) { return b.revenue - a.revenue; });
+  }
+
+  // Customer self-service: find their upcoming confirmed bookings by phone.
+  function findBookingsByPhone(state, phone) {
+    var q = normalizePhone(phone);
+    if (q.length < 4) return [];
+    return (state.bookings || []).filter(function (b) {
+      return b.status === 'confirmed' && normalizePhone(b.phone).indexOf(q) !== -1;
+    }).sort(function (a, b) { return (a.date + pad5(a.start)) < (b.date + pad5(b.start)) ? -1 : 1; });
+  }
+
+  // Customer self-service cancellation (confirmed bookings only).
+  function cancelBooking(state, bookingId) {
+    for (var i = 0; i < state.bookings.length; i++) {
+      if (state.bookings[i].id === bookingId) {
+        if (state.bookings[i].status !== 'confirmed') {
+          return { ok: false, error: 'Only upcoming confirmed bookings can be cancelled.' };
+        }
+        state.bookings[i].status = 'cancelled';
+        return { ok: true, booking: state.bookings[i] };
+      }
+    }
+    return { ok: false, error: 'Booking not found.' };
+  }
+
   return {
     STATUSES: STATUSES,
     DEFAULT_SERVICES: DEFAULT_SERVICES,
@@ -272,6 +341,11 @@
     stats: stats,
     nextOpenDates: nextOpenDates,
     embedSnippet: embedSnippet,
-    reminderMessage: reminderMessage
+    reminderMessage: reminderMessage,
+    bookingsToCSV: bookingsToCSV,
+    searchBookings: searchBookings,
+    revenueByService: revenueByService,
+    findBookingsByPhone: findBookingsByPhone,
+    cancelBooking: cancelBooking
   };
 });

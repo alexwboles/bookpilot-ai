@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# BookPilot AI end-to-end tests — 8 flows exercised in Node against js/logic.js.
+# BookPilot AI end-to-end tests — 13 flows exercised in Node against js/logic.js.
 set -u
 cd "$(dirname "$0")/.."
 
@@ -75,6 +75,48 @@ const open = B.nextOpenDates(st, 's1', 2, '2026-10-04'); // Sun closed, Mon 10-0
 const badSvc = B.validateService({ name: '', durationMin: 9999, price: -5 });
 (open.length === 2 && open[0].date === '2026-10-06' && open[1].date === '2026-10-07' && badSvc.length === 3)
   ? ok('flow8: next-open skips closed Sun + blocked Mon; bad service -> 3 errors') : bad('flow8 ' + JSON.stringify(open.map(o => o.date)));
+
+// Flow 9: owner exports bookings to CSV and it round-trips the full ledger
+st = fresh();
+B.bookSlot(st, { serviceId: 's1', date: '2026-10-05', start: 540, name: 'Ann "Annie" Okafor', phone: '555-0101', notes: 'long hair, extra time' });
+B.bookSlot(st, { serviceId: 's2', date: '2026-10-06', start: 600, name: 'Ben', phone: '555-0102' });
+B.setStatus(st, st.bookings[0].id, 'completed');
+const csv = B.bookingsToCSV(st);
+const csvLines = csv.split('\r\n');
+(csvLines.length === 3 && /"Ann ""Annie"" Okafor"/.test(csv) && /completed/.test(csvLines[1]) && /confirmed/.test(csvLines[2]) && /long hair, extra time/.test(csv))
+  ? ok('flow9: CSV export quotes names, keeps notes + statuses') : bad('flow9 ' + csv.slice(0, 150));
+
+// Flow 10: owner searches the ledger by customer name, service, phone
+const hitName = B.searchBookings(st, 'okafor');
+const hitSvc = B.searchBookings(st, 'color');
+const hitPhone = B.searchBookings(st, '0102');
+const hitNone = B.searchBookings(st, 'zzz-no-match');
+(hitName.length === 1 && hitSvc.length === 1 && hitSvc[0].name === 'Ben' && hitPhone.length === 1 && hitPhone[0].name === 'Ben' && hitNone.length === 0)
+  ? ok('flow10: search by name/service/phone-digits; no match -> empty') : bad('flow10');
+
+// Flow 11: revenue-by-service reflects only completed bookings, ranked
+const rev = B.revenueByService(st.bookings);
+(rev.length === 2 && rev[0].service === 'Cut' && rev[0].revenue === 35 && rev[0].bookings === 1 &&
+ rev[1].service === 'Color' && rev[1].revenue === 0 && rev[1].completed === 0)
+  ? ok('flow11: revenue ranked Cut $35 > Color $0 (not yet completed)') : bad('flow11 ' + JSON.stringify(rev));
+
+// Flow 12: next-available finder lands on first bookable day for the service
+st = fresh();
+for (let t = 540; t < 1020; t += 30) B.bookSlot(st, { serviceId: 's1', date: '2026-10-05', start: t, name: 'Full' + t, phone: '1' });
+const nxt = B.nextOpenDates(st, 's1', 2, '2026-10-05');
+(nxt.length === 2 && nxt[0].date === '2026-10-06' && nxt[0].slots.length > 0 && nxt[1].date === '2026-10-07')
+  ? ok('flow12: next-available skips fully-booked Monday -> Tue/Wed') : bad('flow12 ' + JSON.stringify(nxt.map(o => o.date)));
+
+// Flow 13: customer self-service — find by phone, cancel, cancelled disappears from lookup
+st = fresh();
+B.bookSlot(st, { serviceId: 's1', date: '2026-10-05', start: 540, name: 'Cara', phone: '(555) 777-8888' });
+B.bookSlot(st, { serviceId: 's2', date: '2026-10-06', start: 600, name: 'Cara', phone: '5557778888' });
+const mine1 = B.findBookingsByPhone(st, '555-777-8888');
+const c = B.cancelBooking(st, mine1[0].id);
+const mine2 = B.findBookingsByPhone(st, '555-777-8888');
+const stillThere = st.bookings.filter(b => b.id === mine1[0].id)[0];
+(mine1.length === 2 && c.ok && mine2.length === 1 && stillThere.status === 'cancelled')
+  ? ok('flow13: phone lookup finds 2; self-cancel works; cancelled hidden from lookup') : bad('flow13');
 
 console.log('');
 console.log('e2e: ' + pass + ' passed, ' + fail + ' failed');
