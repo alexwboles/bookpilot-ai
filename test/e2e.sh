@@ -118,6 +118,44 @@ const stillThere = st.bookings.filter(b => b.id === mine1[0].id)[0];
 (mine1.length === 2 && c.ok && mine2.length === 1 && stillThere.status === 'cancelled')
   ? ok('flow13: phone lookup finds 2; self-cancel works; cancelled hidden from lookup') : bad('flow13');
 
+// Flow 14: buffer time shrinks availability end to end
+st = fresh();
+const svcBuf = { id: 's3', name: 'Color+', durationMin: 60, price: 100, bufferMin: 30 };
+st.services.push(svcBuf);
+const rb = B.bookSlot(st, { serviceId: 's3', date: '2026-10-05', start: 540, name: 'Buf', phone: '1' });
+const bufSlots = B.slotsFor('2026-10-05', svcBuf, st.hours, [], st.bookings, { today: '2026-09-28', nowMin: 0, services: st.services });
+(rb.ok && bufSlots.indexOf(600) === -1 && bufSlots.indexOf(660) !== -1)
+  ? ok('flow14: 60min+30buf at 9:00 blocks 10:00, frees 11:00') : bad('flow14 ' + JSON.stringify(bufSlots.slice(0, 4)));
+// other service's buffer also blocks: 30-min cut at 10:15 would overlap the buffer
+const clashOther = B.bookSlot(st, { serviceId: 's1', date: '2026-10-05', start: 615, name: 'X', phone: '2' });
+(!clashOther.ok) ? ok('flow14: another service cannot book inside the buffer window') : bad('flow14 cross-service');
+// but exactly at the buffer end (10:30) is fine — back-to-back is allowed
+const backToBack = B.bookSlot(st, { serviceId: 's1', date: '2026-10-05', start: 630, name: 'Y', phone: '3' });
+(backToBack.ok) ? ok('flow14: booking exactly when the buffer ends is allowed') : bad('flow14 back-to-back');
+
+// Flow 15: waitlist journey — join when full, owner sees it, remove works
+st = fresh();
+const wlSvc = { id: 's9', name: 'Quick', durationMin: 480, price: 10 };
+st.services.push(wlSvc);
+const full = B.slotsFor('2026-10-05', wlSvc, st.hours, [], st.bookings, { today: '2026-09-28', nowMin: 0, services: st.services });
+const wb = B.bookSlot(st, { serviceId: 's9', date: '2026-10-05', start: full[0], name: 'Full', phone: '3' });
+const fullAfter = B.slotsFor('2026-10-05', wlSvc, st.hours, [], st.bookings, { today: '2026-09-28', nowMin: 0, services: st.services });
+const wj = B.addToWaitlist(st, { serviceId: 's9', date: '2026-10-05', name: 'Waiter', phone: '555-0000' });
+(wb.ok && fullAfter.length === 0 && wj.ok && B.waitlistFor(st, 's9', '2026-10-05')[0].name === 'Waiter')
+  ? ok('flow15: day fills -> waitlist join -> owner sees entry') : bad('flow15');
+B.cancelBooking(st, wb.booking.id);
+const freed = B.slotsFor('2026-10-05', wlSvc, st.hours, [], st.bookings, { today: '2026-09-28', nowMin: 0, services: st.services });
+(freed.length > 0) ? ok('flow15: cancellation re-opens a slot for the waitlist') : bad('flow15 reopen');
+
+// Flow 16: booking refs flow into CSV and reminders
+st = fresh();
+B.bookSlot(st, { serviceId: 's1', date: '2026-10-05', start: 540, name: 'Ref', phone: '4' });
+const bk = st.bookings[0];
+const csv16 = B.bookingsToCSV(st);
+const msg16 = B.reminderMessage('Salon', bk);
+(/^B-[0-9A-Z]{4}$/.test(bk.ref) && csv16.indexOf(bk.ref) !== -1 && msg16.indexOf(bk.ref) !== -1)
+  ? ok('flow16: ref on booking, in CSV export, and in reminder text (' + bk.ref + ')') : bad('flow16');
+
 console.log('');
 console.log('e2e: ' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

@@ -9,9 +9,11 @@ Salons, barbers, repair shops, cleaners, tutors, and therapists lose bookings to
 A single static page with two faces: a **customer booking widget** (service → date → time → confirm, embeddable via iframe with `?embed=1`) and an **owner dashboard** (upcoming bookings, day-before reminder nudges, no-show tracking, revenue stats).
 
 ## Features
-1. **Service menu** — name, duration, price. Duration drives the slot grid; price feeds revenue stats.
+1. **Service menu** — name, duration, price, and buffer time. Duration drives the slot grid; price feeds revenue stats; the buffer blocks cleanup/setup minutes after every appointment.
 2. **Availability rules** — per-day working hours, one-click closed days, blocked dates (holidays/vacations).
-3. **Smart slot grid** — slots generated from hours − existing bookings − blocked dates; past times hidden; no double-booking (overlap-checked).
+3. **Smart slot grid** — slots generated from hours − existing bookings − blocked dates − buffer windows; past times hidden; no double-booking (overlap-checked).
+4. **Waitlist** — when a day is fully booked, customers join a waitlist; the owner sees who's waiting per day with a "slot may be free" flag when a cancellation opens time, and one-tap phone copying.
+5. **Booking references** — every booking gets a short ref code (e.g. B-7X2Q), shown at confirmation, in the owner ledger, the customer lookup, CSV exports, and reminder texts.
 4. **Owner bookings board** — filter by status; mark completed / no-show / cancelled.
 5. **Day-before reminders** — auto-flags tomorrow's un-reminded bookings; one-click copy of a personalized SMS reminder; tracks who was reminded.
 6. **No-show tracker + stats** — no-show rate, completed revenue, upcoming count.

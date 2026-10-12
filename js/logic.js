@@ -14,9 +14,9 @@
   var ACTIVE_STATUSES = ['confirmed']; // statuses that block a slot
 
   var DEFAULT_SERVICES = [
-    { id: 'svc-cut', name: 'Haircut', durationMin: 30, price: 35 },
-    { id: 'svc-color', name: 'Full color', durationMin: 120, price: 120 },
-    { id: 'svc-massage', name: 'Deep tissue massage (60 min)', durationMin: 60, price: 90 }
+    { id: 'svc-cut', name: 'Haircut', durationMin: 30, price: 35, bufferMin: 0 },
+    { id: 'svc-color', name: 'Full color', durationMin: 120, price: 120, bufferMin: 15 },
+    { id: 'svc-massage', name: 'Deep tissue massage (60 min)', durationMin: 60, price: 90, bufferMin: 10 }
   ];
 
   // Default working hours in minutes from midnight, keyed by JS weekday (0=Sun).
@@ -80,6 +80,20 @@
     return (prefix || 'id') + '-' + Date.now().toString(36) + '-' + Math.floor(Math.random() * 1e6).toString(36);
   }
 
+  // Buffer time: cleanup/setup minutes blocked after each appointment.
+  // Returns 0-120 (0 when the service has none or is unknown).
+  function bufferOf(service) {
+    var b = parseInt(service && service.bufferMin, 10);
+    if (isNaN(b) || b < 0) return 0;
+    return Math.min(b, 120);
+  }
+
+  // Blocked window of an existing booking, extended by its own service's buffer.
+  function bookingBlockWindow(state, b) {
+    var svc = getService(state.services, b.serviceId);
+    return { start: b.start, end: b.end + bufferOf(svc) };
+  }
+
   function validateService(s) {
     var errs = [];
     if (!s || !s.name || !String(s.name).trim()) errs.push('Service needs a name.');
@@ -87,6 +101,8 @@
     if (!(d >= 5 && d <= 480)) errs.push('Duration must be 5–480 minutes.');
     var p = parseFloat(s.price);
     if (isNaN(p) || p < 0) errs.push('Price must be 0 or more.');
+    var bf = (s.bufferMin == null || s.bufferMin === '') ? 0 : parseInt(s.bufferMin, 10);
+    if (isNaN(bf) || bf < 0 || bf > 120) errs.push('Buffer must be 0–120 minutes.');
     return errs;
   }
 
@@ -100,7 +116,10 @@
   }
 
   // All bookable start-times (minutes) for a service on a date.
-  // opts: { today: 'YYYY-MM-DD', nowMin: 123 } to hide past slots when date is today.
+  // opts: { today: 'YYYY-MM-DD', nowMin: 123, services: [...] } to hide past
+  // slots when date is today. Buffer minutes extend every blocked window:
+  // the new service's buffer after the candidate slot, and each existing
+  // booking's own service buffer after it.
   function slotsFor(dateStr, service, hours, blockedDates, bookings, opts) {
     opts = opts || {};
     if (!service || !dateStr) return [];
@@ -109,6 +128,8 @@
     if (!dayHours) return []; // closed
     var open = dayHours[0], close = dayHours[1];
     var dur = service.durationMin;
+    var bufNew = bufferOf(service);
+    var svcs = opts.services || [];
     var out = [];
     var isToday = opts.today && dateStr === opts.today;
     var cutoff = isToday ? (opts.nowMin != null ? opts.nowMin : nowMinutes()) : -1;
@@ -119,7 +140,8 @@
         var b = bookings[i];
         if (b.date !== dateStr) continue;
         if (ACTIVE_STATUSES.indexOf(b.status) === -1) continue;
-        if (overlaps(t, t + dur, b.start, b.end)) { clash = true; break; }
+        var svcB = getService(svcs, b.serviceId);
+        if (overlaps(t, t + dur + bufNew, b.start, b.end + bufferOf(svcB))) { clash = true; break; }
       }
       if (!clash) out.push(t);
     }
@@ -137,6 +159,15 @@
     return { errors: errs, service: svc };
   }
 
+  // Short human-readable booking reference, e.g. "B-7X2Q". Deterministic from
+  // the booking id so old bookings (stored before refs existed) resolve too.
+  function bookingRef(id) {
+    var h = 0;
+    var s = String(id || '');
+    for (var i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+    return 'B-' + Math.abs(h).toString(36).toUpperCase().padStart(4, '0').slice(-4);
+  }
+
   // Attempt to book. Returns { ok:true, booking } or { ok:false, error }.
   function bookSlot(state, inp) {
     var v = validateBookingInput(inp, state.services);
@@ -147,13 +178,17 @@
     if (!dayHours) return { ok: false, error: 'Closed that day — please pick another.' };
     var end = inp.start + svc.durationMin;
     if (inp.start < dayHours[0] || end > dayHours[1]) return { ok: false, error: 'Outside working hours.' };
+    var bufNew = bufferOf(svc);
     for (var i = 0; i < state.bookings.length; i++) {
       var b = state.bookings[i];
       if (b.date !== inp.date || ACTIVE_STATUSES.indexOf(b.status) === -1) continue;
-      if (overlaps(inp.start, end, b.start, b.end)) return { ok: false, error: 'That slot was just taken — please pick another.' };
+      var win = bookingBlockWindow(state, b);
+      if (overlaps(inp.start, end + bufNew, win.start, win.end)) return { ok: false, error: 'That slot was just taken — please pick another.' };
     }
+    var id = uid('bk');
     var booking = {
-      id: uid('bk'),
+      id: id,
+      ref: bookingRef(id),
       serviceId: svc.id,
       serviceName: svc.name,
       durationMin: svc.durationMin,
@@ -244,7 +279,8 @@
 
   function reminderMessage(bizName, b) {
     return 'Hi ' + b.name + '! Reminder: you have ' + b.serviceName + ' at ' + bizName +
-      ' on ' + fmtDate(b.date) + ' at ' + fmtTime(b.start) + '. Reply to confirm or reschedule. Thanks!';
+      ' on ' + fmtDate(b.date) + ' at ' + fmtTime(b.start) + '. Booking ref ' +
+      (b.ref || bookingRef(b.id)) + '. Reply to confirm or reschedule. Thanks!';
   }
 
   function csvEscape(v) {
@@ -254,13 +290,13 @@
 
   // Full bookings export (owner). Sorted chronologically; CSV-safe escaping.
   function bookingsToCSV(state) {
-    var header = ['Date', 'Time', 'Customer', 'Phone', 'Service', 'Duration (min)', 'Price', 'Status', 'Notes'];
+    var header = ['Ref', 'Date', 'Time', 'Customer', 'Phone', 'Service', 'Duration (min)', 'Price', 'Status', 'Notes'];
     var list = (state.bookings || []).slice().sort(function (a, b) {
       return (a.date + pad5(a.start)) < (b.date + pad5(b.start)) ? -1 : 1;
     });
     var rows = [header];
     list.forEach(function (b) {
-      rows.push([b.date, fmtRange(b.start, b.end), b.name || '', b.phone || '',
+      rows.push([b.ref || bookingRef(b.id), b.date, fmtRange(b.start, b.end), b.name || '', b.phone || '',
         b.serviceName || '', b.durationMin || '', b.price || 0, b.status || '', b.notes || '']);
     });
     return rows.map(function (r) { return r.map(csvEscape).join(','); }).join('\r\n');
@@ -316,6 +352,51 @@
     return { ok: false, error: 'Booking not found.' };
   }
 
+  // Waitlist: customers join when a day is fully booked. The owner sees who
+  // is waiting per service+date and can reach out when a slot frees up.
+  // inp: { serviceId, date, name, phone }.
+  function addToWaitlist(state, inp) {
+    var errs = [];
+    var svc = getService(state.services, inp.serviceId);
+    if (!svc) errs.push('Pick a service.');
+    if (!inp.date || !/^\d{4}-\d{2}-\d{2}$/.test(inp.date)) errs.push('Pick a valid date.');
+    if (!inp.name || !String(inp.name).trim()) errs.push('Your name is required.');
+    if (!inp.phone || !String(inp.phone).trim()) errs.push('A phone number is required so we can reach you.');
+    if (errs.length) return { ok: false, error: errs[0] };
+    state.waitlist = state.waitlist || [];
+    var dup = state.waitlist.some(function (w) {
+      return w.serviceId === inp.serviceId && w.date === inp.date &&
+        normalizePhone(w.phone) === normalizePhone(inp.phone);
+    });
+    if (dup) return { ok: false, error: 'You are already on the waitlist for that day.' };
+    var entry = {
+      id: uid('wl'),
+      serviceId: svc.id,
+      serviceName: svc.name,
+      date: inp.date,
+      name: String(inp.name).trim(),
+      phone: String(inp.phone).trim(),
+      createdAt: new Date().toISOString()
+    };
+    state.waitlist.push(entry);
+    return { ok: true, entry: entry };
+  }
+
+  function removeFromWaitlist(state, id) {
+    state.waitlist = state.waitlist || [];
+    for (var i = 0; i < state.waitlist.length; i++) {
+      if (state.waitlist[i].id === id) { state.waitlist.splice(i, 1); return true; }
+    }
+    return false;
+  }
+
+  // Waitlist entries for a service+date (either filter optional), oldest first.
+  function waitlistFor(state, serviceId, date) {
+    return (state.waitlist || []).filter(function (w) {
+      return (!serviceId || w.serviceId === serviceId) && (!date || w.date === date);
+    }).sort(function (a, b) { return a.createdAt < b.createdAt ? -1 : 1; });
+  }
+
   return {
     STATUSES: STATUSES,
     DEFAULT_SERVICES: DEFAULT_SERVICES,
@@ -346,6 +427,11 @@
     searchBookings: searchBookings,
     revenueByService: revenueByService,
     findBookingsByPhone: findBookingsByPhone,
-    cancelBooking: cancelBooking
+    cancelBooking: cancelBooking,
+    bufferOf: bufferOf,
+    bookingRef: bookingRef,
+    addToWaitlist: addToWaitlist,
+    removeFromWaitlist: removeFromWaitlist,
+    waitlistFor: waitlistFor
   };
 });

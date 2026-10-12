@@ -135,6 +135,15 @@
       <div id="bookingsTable"></div>
     </div>
     <div class="card">
+      <div class="card-head">
+        <div>
+          <h2>Waitlist</h2>
+          <p class="sub">Customers waiting for a spot. When a booking cancels and a slot opens, call them — the phone number copies in one tap.</p>
+        </div>
+      </div>
+      <div id="waitlistBox"></div>
+    </div>
+    <div class="card">
       <h2>The numbers</h2>
       <p class="sub">No-show rate is the number to watch — reminders are the cheapest fix.</p>
       <div class="stats" id="statsRow"></div>
@@ -150,7 +159,7 @@
       <div class="card-head">
         <div>
           <h2>Service menu</h2>
-          <p class="sub">What customers can book. Duration drives the slot grid; price feeds your revenue stats.</p>
+          <p class="sub">What customers can book. Duration drives the slot grid; the buffer blocks cleanup/setup time after each appointment; price feeds your revenue stats.</p>
         </div>
       </div>
       <div id="serviceList"></div>
@@ -159,6 +168,7 @@
         <div><label for="svcName">Name</label><input type="text" id="svcName" placeholder="e.g. Beard trim"></div>
         <div><label for="svcDur">Duration (minutes)</label><input type="number" id="svcDur" value="30" min="5" max="480"></div>
         <div><label for="svcPrice">Price ($)</label><input type="number" id="svcPrice" value="25" min="0" step="1"></div>
+        <div><label for="svcBuf">Buffer after (min)</label><input type="number" id="svcBuf" value="0" min="0" max="120" title="Cleanup/setup time blocked after each appointment"></div>
       </div>
       <div style="margin-top:12px"><button class="btn primary" id="svcAdd">Add service</button></div>
     </div>

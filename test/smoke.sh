@@ -84,8 +84,8 @@ B.bookSlot(st, { serviceId: 's1', date: '2026-10-06', start: 600, name: 'Bob', p
 // 13: bookings CSV export — header, row count, comma-in-name escaped
 const csv = B.bookingsToCSV(st);
 const lines = csv.split('\r\n');
-(lines.length === 3 && lines[0] === 'Date,Time,Customer,Phone,Service,Duration (min),Price,Status,Notes' && /"Jane, Jr\."/.test(lines[1]) && /Bob/.test(lines[2]))
-  ? ok('bookingsToCSV: header + 2 rows, comma name quoted') : bad('csv=' + csv.slice(0, 120));
+(lines.length === 3 && lines[0] === 'Ref,Date,Time,Customer,Phone,Service,Duration (min),Price,Status,Notes' && /"Jane, Jr\."/.test(lines[1]) && /Bob/.test(lines[2]) && /^B-[0-9A-Z]{4},/.test(lines[1]))
+  ? ok('bookingsToCSV: header + 2 rows, comma name quoted, ref column present') : bad('csv=' + csv.slice(0, 140));
 
 // 14: search — by name (case-insensitive), by phone digits, empty q returns all
 const byName = B.searchBookings(st, 'jane');
@@ -127,9 +127,55 @@ EOF
 [ $? -eq 0 ] && ok "new-feature node checks" || bad "new-feature node checks"
 
 # 18: new DOM ids present in index.html
-for id in fltSearch exportCsv svcRevenue bkNextAvail lkPhone lkFind lkResults; do
+for id in fltSearch exportCsv svcRevenue bkNextAvail lkPhone lkFind lkResults waitlistBox svcBuf; do
   if grep -q "id=\"$id\"" index.html; then ok "index.html has #$id"; else bad "index.html missing #$id"; fi
 done
+
+# 19: buffer time blocks cleanup windows in the slot grid
+node << 'EOF'
+const B = require('/home/hatch/workspace/bookpilot-ai/js/logic.js');
+const svc = { id: 's1', name: 'Cut', durationMin: 30, price: 35, bufferMin: 15 };
+const hours = B.defaultHours();
+const st = { services: [svc], hours: hours, blockedDates: [], bookings: [] };
+const r = B.bookSlot(st, { serviceId: 's1', date: '2026-10-05', start: 540, name: 'A', phone: '1' });
+if (!r.ok) { console.log('book failed'); process.exit(1); }
+// 30-min cut at 9:00 with 15-min buffer blocks 9:30 (needs 9:30+30+15)
+const slots = B.slotsFor('2026-10-05', svc, hours, [], st.bookings, { today: '2026-09-28', nowMin: 0, services: st.services });
+if (slots.indexOf(570) !== -1) { console.log('930 not blocked by buffer'); process.exit(1); }
+if (slots.indexOf(600) === -1) { console.log('1000 should be free'); process.exit(1); }
+// double-booking into the buffer window is rejected at book time too
+const r2 = B.bookSlot(st, { serviceId: 's1', date: '2026-10-05', start: 570, name: 'B', phone: '2' });
+if (r2.ok) { console.log('buffer overlap booked'); process.exit(1); }
+console.log('buffer blocks 9:30 slot and booking; 10:00 stays free');
+EOF
+[ $? -eq 0 ] && ok "bufferMin enforced in slotsFor + bookSlot" || bad "buffer enforcement"
+
+# 20: booking refs are stable, formatted, and stored on new bookings
+node << 'EOF'
+const B = require('/home/hatch/workspace/bookpilot-ai/js/logic.js');
+const st = { services: [{ id: 's1', name: 'Cut', durationMin: 30, price: 35 }], hours: B.defaultHours(), blockedDates: [], bookings: [] };
+const r = B.bookSlot(st, { serviceId: 's1', date: '2026-10-05', start: 540, name: 'A', phone: '1' });
+if (!r.ok || !/^B-[0-9A-Z]{4}$/.test(r.booking.ref)) { console.log('ref bad: ' + (r.booking && r.booking.ref)); process.exit(1); }
+if (B.bookingRef(r.booking.id) !== r.booking.ref) { console.log('ref not deterministic'); process.exit(1); }
+if (B.bookingRef('old-id-without-ref') === B.bookingRef('other-id')) { console.log('refs collide'); process.exit(1); }
+console.log('ref ' + r.booking.ref + ' ok');
+EOF
+[ $? -eq 0 ] && ok "bookingRef generated, stable, formatted B-XXXX" || bad "bookingRef"
+
+# 21: waitlist add / duplicate / remove / filter
+node << 'EOF'
+const B = require('/home/hatch/workspace/bookpilot-ai/js/logic.js');
+const st = { services: [{ id: 's1', name: 'Cut', durationMin: 30, price: 35 }], hours: B.defaultHours(), blockedDates: [], bookings: [], waitlist: [] };
+const a = B.addToWaitlist(st, { serviceId: 's1', date: '2026-10-05', name: 'Ann', phone: '(555) 111-2222' });
+const dup = B.addToWaitlist(st, { serviceId: 's1', date: '2026-10-05', name: 'Ann', phone: '5551112222' });
+const bad = B.addToWaitlist(st, { serviceId: 's1', date: '2026-10-05', name: '', phone: '1' });
+if (!a.ok || dup.ok || bad.ok) { console.log('add/dup/bad wrong'); process.exit(1); }
+if (B.waitlistFor(st, 's1', '2026-10-05').length !== 1) { console.log('filter wrong'); process.exit(1); }
+if (!B.removeFromWaitlist(st, a.entry.id) || B.waitlistFor(st).length !== 0) { console.log('remove wrong'); process.exit(1); }
+if (B.removeFromWaitlist(st, 'nope')) { console.log('bad remove'); process.exit(1); }
+console.log('waitlist lifecycle ok');
+EOF
+[ $? -eq 0 ] && ok "waitlist: add, dup-reject, validation, remove, filter" || bad "waitlist"
 
 echo ""
 echo "smoke: $PASS passed, $FAIL failed"

@@ -13,7 +13,8 @@
       services: JSON.parse(JSON.stringify(B.DEFAULT_SERVICES)),
       hours: B.defaultHours(),
       blockedDates: [],       // [{date, note}]
-      bookings: []
+      bookings: [],
+      waitlist: []            // [{id, serviceId, serviceName, date, name, phone, createdAt}]
     };
   }
 
@@ -26,6 +27,7 @@
         s.hours = s.hours || B.defaultHours();
         s.blockedDates = s.blockedDates || [];
         s.bookings = s.bookings || [];
+        s.waitlist = s.waitlist || [];
         return s;
       }
     } catch (e) {}
@@ -80,7 +82,8 @@
   function serviceOptions(sel, includeAll) {
     var html = includeAll ? '<option value="">All services</option>' : '';
     state.services.forEach(function (s) {
-      html += '<option value="' + esc(s.id) + '">' + esc(s.name) + ' — ' + s.durationMin + ' min · $' + s.price + '</option>';
+      var buf = B.bufferOf(s) ? ' · +' + B.bufferOf(s) + 'm buffer' : '';
+      html += '<option value="' + esc(s.id) + '">' + esc(s.name) + ' — ' + s.durationMin + ' min · $' + s.price + buf + '</option>';
     });
     sel.innerHTML = html;
   }
@@ -107,9 +110,10 @@
     serviceOptions($('bkService'), false);
     serviceOptions($('embService'), true);
     renderSvcCards();
-    var html = '<table><tr><th>Service</th><th>Duration</th><th>Price</th><th></th></tr>';
+    var html = '<table><tr><th>Service</th><th>Duration</th><th>Buffer</th><th>Price</th><th></th></tr>';
     state.services.forEach(function (s) {
-      html += '<tr><td>' + esc(s.name) + '</td><td>' + s.durationMin + ' min</td><td>$' + s.price +
+      var buf = B.bufferOf(s) ? B.bufferOf(s) + ' min' : '—';
+      html += '<tr><td>' + esc(s.name) + '</td><td>' + s.durationMin + ' min</td><td>' + buf + '</td><td>$' + s.price +
         '</td><td><button class="danger small" data-del-svc="' + esc(s.id) + '">Delete</button></td></tr>';
     });
     $('serviceList').innerHTML = html + '</table>';
@@ -130,13 +134,15 @@
   }
 
   $('svcAdd').addEventListener('click', function () {
-    var s = { id: B.uid('svc'), name: $('svcName').value, durationMin: $('svcDur').value, price: $('svcPrice').value };
+    var s = { id: B.uid('svc'), name: $('svcName').value, durationMin: $('svcDur').value,
+      price: $('svcPrice').value, bufferMin: $('svcBuf').value };
     var errs = B.validateService(s);
     if (errs.length) { alert(errs[0]); return; }
     s.durationMin = parseInt(s.durationMin, 10);
     s.price = parseFloat(s.price);
+    s.bufferMin = parseInt(s.bufferMin, 10) || 0;
     state.services.push(s);
-    $('svcName').value = ''; $('svcDur').value = 30; $('svcPrice').value = 25;
+    $('svcName').value = ''; $('svcDur').value = 30; $('svcPrice').value = 25; $('svcBuf').value = 0;
     save(); renderServices();
   });
 
@@ -229,8 +235,28 @@
     if (!date) { wrap.innerHTML = '<p class="muted">Pick a date to see available times.</p>'; setStep(1); return; }
     if (B.isBlocked(date, blockedDateList())) { wrap.innerHTML = '<div class="warnbox">That date is blocked — please pick another day.</div>'; setStep(2); return; }
     var slots = B.slotsFor(date, svc, state.hours, blockedDateList(), state.bookings,
-      { today: B.todayStr() });
-    if (!slots.length) { wrap.innerHTML = '<div class="warnbox">No availability on ' + esc(B.fmtDate(date)) + ' — try another day.</div>'; setStep(2); return; }
+      { today: B.todayStr(), services: state.services });
+    if (!slots.length) {
+      wrap.innerHTML = '<div class="warnbox">No availability on ' + esc(B.fmtDate(date)) + ' — try another day, or join the waitlist below.</div>' +
+        '<div class="waitlist-join"><h4>Join the waitlist</h4>' +
+        '<p class="muted small">We\'ll hold your spot — if a time opens up, the owner can call you.</p>' +
+        '<div class="row"><div><label for="wlName">Your name</label><input type="text" id="wlName" placeholder="Jane Doe"></div>' +
+        '<div><label for="wlPhone">Phone</label><input type="tel" id="wlPhone" placeholder="555-123-4567"></div></div>' +
+        '<div style="margin-top:10px"><button class="btn primary" id="wlJoin">Join waitlist</button></div>' +
+        '<div id="wlResult" style="margin-top:10px"></div></div>';
+      setStep(2);
+      $('wlJoin').addEventListener('click', function () {
+        var r = B.addToWaitlist(state, {
+          serviceId: svc.id, date: date,
+          name: $('wlName').value, phone: $('wlPhone').value
+        });
+        if (!r.ok) { $('wlResult').innerHTML = '<div class="warnbox">' + esc(r.error) + '</div>'; return; }
+        save();
+        $('wlResult').innerHTML = '<div class="notice"><strong>You\'re on the waitlist</strong> for ' +
+          esc(svc.name) + ' on ' + esc(B.fmtDate(date)) + '. We\'ll call ' + esc(r.entry.phone) + ' if a spot opens.</div>';
+      });
+      return;
+    }
     var html = '<div class="slot-label">Available times — ' + esc(B.fmtDate(date)) + '</div><div class="slotgrid">';
     slots.forEach(function (t) {
       html += '<button data-slot="' + t + '">' + B.fmtTime(t) + '</button>';
@@ -267,7 +293,8 @@
     var b = r.booking;
     $('bkResult').innerHTML = '<div class="notice"><strong>Booked!</strong> ' + esc(b.serviceName) +
       ' on ' + esc(B.fmtDate(b.date)) + ' at ' + esc(B.fmtTime(b.start)) +
-      '. We\'ll see you then, ' + esc(b.name.split(' ')[0]) + '.</div>';
+      '. We\'ll see you then, ' + esc(b.name.split(' ')[0]) + '.' +
+      '<br><span class="muted">Your booking ref: <strong>' + esc(b.ref || B.bookingRef(b.id)) + '</strong> — keep it handy.</span></div>';
     $('bkForm').style.display = 'none';
     $('bkName').value = ''; $('bkPhone').value = ''; $('bkNotes').value = '';
     renderSvcCards();
@@ -293,11 +320,12 @@
 
     if (!list.length) { $('bookingsTable').innerHTML = '<p class="muted">No bookings here yet.</p>'; }
     else {
-      var html = '<table><tr><th>When</th><th>Customer</th><th>Service</th><th>Status</th><th>Actions</th></tr>';
+      var html = '<table><tr><th>When</th><th>Customer</th><th>Service</th><th>Ref</th><th>Status</th><th>Actions</th></tr>';
       list.forEach(function (b) {
         html += '<tr><td>' + esc(B.fmtDate(b.date)) + '<br><span class="muted">' + esc(B.fmtRange(b.start, b.end)) + '</span></td>' +
           '<td>' + esc(b.name) + '<br><span class="muted">' + esc(b.phone) + '</span></td>' +
           '<td>' + esc(b.serviceName) + '<br><span class="muted">$' + b.price + '</span></td>' +
+          '<td><span class="refcode">' + esc(b.ref || B.bookingRef(b.id)) + '</span></td>' +
           '<td><span class="pill ' + b.status + '">' + b.status + '</span></td><td>' +
           '<button class="ghost small" data-act="completed" data-id="' + b.id + '">Complete</button> ' +
           '<button class="ghost small" data-act="no-show" data-id="' + b.id + '">No-show</button> ' +
@@ -337,6 +365,49 @@
     } else {
       rb.innerHTML = '<div class="notice">No reminders due — nothing booked for tomorrow, or all reminders sent.</div>';
     }
+
+    renderWaitlist();
+  }
+
+  // ---------- owner: waitlist ----------
+  function renderWaitlist() {
+    var host = $('waitlistBox');
+    if (!host) return;
+    var list = B.waitlistFor(state, null, null);
+    if (!list.length) {
+      host.innerHTML = '<p class="muted">Waitlist is empty — customers can join it when a day has no free slots.</p>';
+      return;
+    }
+    var today = B.todayStr();
+    var html = '<table><tr><th>When</th><th>Customer</th><th>Service</th><th>Opening?</th><th></th></tr>';
+    list.forEach(function (w) {
+      var svc = B.getService(state.services, w.serviceId);
+      var open = false;
+      if (svc && w.date >= today && !B.isBlocked(w.date, blockedDateList())) {
+        open = B.slotsFor(w.date, svc, state.hours, blockedDateList(), state.bookings,
+          { today: today, services: state.services, nowMin: 0 }).length > 0;
+      }
+      html += '<tr><td>' + esc(B.fmtDate(w.date)) + '</td>' +
+        '<td>' + esc(w.name) + '<br><span class="muted">' + esc(w.phone) + '</span></td>' +
+        '<td>' + esc(w.serviceName) + '</td>' +
+        '<td>' + (open ? '<span class="pill confirmed">slot may be free</span>' : '<span class="muted">—</span>') + '</td>' +
+        '<td><button class="ghost small" data-wl-copy="' + w.id + '">Copy number</button> ' +
+        '<button class="danger small" data-wl-del="' + w.id + '">Remove</button></td></tr>';
+    });
+    host.innerHTML = html + '</table>';
+    host.querySelectorAll('[data-wl-del]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        B.removeFromWaitlist(state, btn.dataset.wlDel);
+        save(); renderWaitlist();
+      });
+    });
+    host.querySelectorAll('[data-wl-copy]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var found = null;
+        (state.waitlist || []).forEach(function (w) { if (w.id === btn.dataset.wlCopy) found = w; });
+        if (found) copyText(found.phone);
+      });
+    });
   }
 
   function copyText(t) {
@@ -403,10 +474,11 @@
       host.innerHTML = '<p class="muted">No upcoming bookings found for that phone number. Check the number and try again.</p>';
       return;
     }
-    var html = '<table><tr><th>When</th><th>Service</th><th>Status</th><th></th></tr>';
+    var html = '<table><tr><th>When</th><th>Service</th><th>Ref</th><th>Status</th><th></th></tr>';
     hits.forEach(function (b) {
       html += '<tr><td>' + esc(B.fmtDate(b.date)) + '<br><span class="muted">' + esc(B.fmtRange(b.start, b.end)) + '</span></td>' +
         '<td>' + esc(b.serviceName) + '<br><span class="muted">' + esc(b.name) + '</span></td>' +
+        '<td><span class="refcode">' + esc(b.ref || B.bookingRef(b.id)) + '</span></td>' +
         '<td><span class="pill confirmed">confirmed</span></td>' +
         '<td><button class="danger small" data-selfcancel="' + b.id + '">Cancel booking</button></td></tr>';
     });
