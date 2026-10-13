@@ -61,7 +61,9 @@
   });
 
   if (EMBED) {
-    document.querySelector('header p').textContent = 'Book online in seconds — pick a service, day, and time.';
+    document.body.classList.add('embed');
+    var hp = document.querySelector('header p');
+    if (hp) hp.textContent = 'Book online in seconds — pick a service, day, and time.';
     var tabsEl = $('mainTabs');
     if (tabsEl) tabsEl.style.display = 'none';
     showTab('book');
@@ -225,15 +227,90 @@
     return state.blockedDates.map(function (bd) { return typeof bd === 'string' ? bd : bd.date; });
   }
 
+  // Month calendar with per-day availability (Calendly-style).
+  var calCursor = null; // 'YYYY-MM'
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  function calSetCursor(ym) { calCursor = ym; }
+  function renderCalendar() {
+    var grid = $('calGrid');
+    if (!grid) return;
+    var svc = B.getService(state.services, $('bkService').value);
+    var today = B.todayStr();
+    if (!calCursor) {
+      var now = new Date();
+      calCursor = now.getFullYear() + '-' + pad2(now.getMonth() + 1);
+    }
+    var parts = calCursor.split('-');
+    var y = parseInt(parts[0], 10), m = parseInt(parts[1], 10);
+    var monthName = new Date(y, m - 1, 1).toLocaleString('en', { month: 'long', year: 'numeric' });
+    $('calTitle').textContent = monthName;
+    var first = new Date(y, m - 1, 1).getDay();
+    var days = new Date(y, m, 0).getDate();
+    var blocked = blockedDateList();
+    var html = DAYS.map(function (d) { return '<span class="cal-dow">' + d + '</span>'; }).join('');
+    for (var i = 0; i < first; i++) html += '<span class="cal-day pad"></span>';
+    for (var d = 1; d <= days; d++) {
+      var ds = y + '-' + pad2(m) + '-' + pad2(d);
+      var dow = new Date(y, m - 1, d).getDay();
+      var closed = !state.hours[dow] || B.isBlocked(ds, blocked);
+      var past = ds < today;
+      var n = 0;
+      if (svc && !closed && !past) {
+        n = B.slotsFor(ds, svc, state.hours, blocked, state.bookings,
+          { today: today, services: state.services }).length;
+      }
+      var cls = 'cal-day' + (closed || past ? ' off' : '') + (n > 0 ? ' open' : '') +
+        ($('bkDate').value === ds ? ' sel' : '');
+      html += '<button type="button" class="' + cls + '" data-day="' + ds + '"' +
+        ((closed || past) ? ' disabled' : '') + ' aria-label="' + esc(B.fmtDate(ds)) +
+        (n > 0 ? ', ' + n + ' times available' : '') + '">' +
+        '<span class="dnum">' + d + '</span>' +
+        (n > 0 ? '<span class="dcnt">' + n + '</span>' : '') + '</button>';
+    }
+    grid.innerHTML = html;
+    grid.querySelectorAll('[data-day]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        $('bkDate').value = btn.dataset.day;
+        renderBookingForm();
+      });
+    });
+  }
+  function calShift(delta) {
+    var parts = (calCursor || B.todayStr().slice(0, 7)).split('-');
+    var d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1 + delta, 1);
+    calCursor = d.getFullYear() + '-' + pad2(d.getMonth() + 1);
+    renderCalendar();
+  }
+
+  function renderSvcSummary(svc) {
+    var host = $('svcSummary');
+    if (!host) return;
+    if (!svc) { host.innerHTML = '<p class="muted small">Pick a service to see details.</p>'; return; }
+    var buf = B.bufferOf(svc) ? ' · +' + B.bufferOf(svc) + 'm buffer' : '';
+    host.innerHTML = '<div class="svc-sum-name">' + esc(svc.name) + '</div>' +
+      '<div class="svc-sum-meta">' + svc.durationMin + ' min · $' + svc.price + buf + '</div>' +
+      '<p class="muted small">Selected service — change it on the right if you need.</p>';
+  }
+
+  function slotGroupLabel(t) {
+    return t < 720 ? 'Morning' : (t < 1020 ? 'Afternoon' : 'Evening');
+  }
+
   function renderBookingForm() {
     var svc = B.getService(state.services, $('bkService').value);
     var date = $('bkDate').value;
     var wrap = $('slotWrap');
     $('bkForm').style.display = 'none';
     selSlot = null;
-    if (!svc) { wrap.innerHTML = '<p class="muted">Add a service first (Services tab).</p>'; setStep(1); return; }
-    if (!date) { wrap.innerHTML = '<p class="muted">Pick a date to see available times.</p>'; setStep(1); return; }
-    if (B.isBlocked(date, blockedDateList())) { wrap.innerHTML = '<div class="warnbox">That date is blocked — please pick another day.</div>'; setStep(2); return; }
+    if (!svc) {
+      wrap.innerHTML = '<p class="muted">Add a service first (Services tab).</p>';
+      renderSvcSummary(null); renderCalendar(); setStep(1); return;
+    }
+    if (!date) {
+      wrap.innerHTML = '<p class="muted">Pick a highlighted day to see available times.</p>';
+      renderSvcSummary(svc); renderCalendar(); setStep(1); return;
+    }
+    if (B.isBlocked(date, blockedDateList())) { wrap.innerHTML = '<div class="warnbox">That date is blocked — please pick another day.</div>'; renderCalendar(); setStep(2); return; }
     var slots = B.slotsFor(date, svc, state.hours, blockedDateList(), state.bookings,
       { today: B.todayStr(), services: state.services });
     if (!slots.length) {
@@ -257,11 +334,23 @@
       });
       return;
     }
-    var html = '<div class="slot-label">Available times — ' + esc(B.fmtDate(date)) + '</div><div class="slotgrid">';
+    var groups = {};
     slots.forEach(function (t) {
-      html += '<button data-slot="' + t + '">' + B.fmtTime(t) + '</button>';
+      var g = slotGroupLabel(t);
+      (groups[g] = groups[g] || []).push(t);
     });
-    wrap.innerHTML = html + '</div>';
+    var html = '<div class="slot-label">Available times — ' + esc(B.fmtDate(date)) + '</div>';
+    ['Morning', 'Afternoon', 'Evening'].forEach(function (g) {
+      if (!groups[g]) return;
+      html += '<div class="slot-group"><span class="slot-group-h">' + g + '</span><div class="slotgrid">';
+      groups[g].forEach(function (t) {
+        html += '<button data-slot="' + t + '">' + B.fmtTime(t) + '</button>';
+      });
+      html += '</div></div>';
+    });
+    wrap.innerHTML = html;
+    renderSvcSummary(svc);
+    renderCalendar();
     setStep(2);
     wrap.querySelectorAll('[data-slot]').forEach(function (btn) {
       btn.addEventListener('click', function () {
@@ -291,6 +380,8 @@
   $('bkPhone').addEventListener('input', renderReturning);
   $('bkService').addEventListener('change', function () { renderSvcCards(); renderBookingForm(); });
   $('bkDate').addEventListener('change', renderBookingForm);
+  if ($('calPrev')) $('calPrev').addEventListener('click', function () { calShift(-1); });
+  if ($('calNext')) $('calNext').addEventListener('click', function () { calShift(1); });
 
   $('bkConfirm').addEventListener('click', function () {
     if (selSlot == null) { alert('Pick a time slot first.'); return; }
@@ -574,7 +665,11 @@
 
   // ---------- misc ----------
   $('bizName').value = state.bizName || '';
-  $('bizName').addEventListener('input', function () { state.bizName = $('bizName').value; save(); });
+  function syncBizName() {
+    var el = $('bookBizName');
+    if (el) el.textContent = state.bizName || 'Your business';
+  }
+  $('bizName').addEventListener('input', function () { state.bizName = $('bizName').value; save(); syncBizName(); });
 
   $('resetDemo').addEventListener('click', function () {
     if (!confirm('Load demo services, hours, and sample bookings? This replaces current data.')) return;
@@ -597,6 +692,7 @@
 
   function boot() {
     $('bizName').value = state.bizName || '';
+    syncBizName();
     renderServices();
     renderHours();
     renderBlocked();

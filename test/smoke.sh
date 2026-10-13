@@ -177,6 +177,29 @@ console.log('waitlist lifecycle ok');
 EOF
 [ $? -eq 0 ] && ok "waitlist: add, dup-reject, validation, remove, filter" || bad "waitlist"
 
+# 23: redesign — month calendar with availability, two-pane booking face, embed chrome
+node << 'EOF'
+const fs = require('fs');
+const h = fs.readFileSync('/home/hatch/workspace/bookpilot-ai/index.html', 'utf8');
+const a = fs.readFileSync('/home/hatch/workspace/bookpilot-ai/js/app.js', 'utf8');
+const c = fs.readFileSync('/home/hatch/workspace/bookpilot-ai/css/style.css', 'utf8');
+for (const id of ['calGrid', 'calTitle', 'calPrev', 'calNext', 'bookBizName', 'svcSummary', 'bkDate']) {
+  if (!h.includes('id="' + id + '"')) { console.log('missing ' + id); process.exit(1); }
+}
+for (const s of ['renderCalendar', 'calShift', 'slotGroupLabel', 'renderSvcSummary', 'syncBizName',
+                "classList.add('embed')", 'data-day', 'slot-group-h', 'Morning', 'Afternoon', 'Evening']) {
+  if (!a.includes(s)) { console.log('app missing ' + s); process.exit(1); }
+}
+for (const s of ['.cal-grid', '.cal-day', '.dcnt', '.book-grid', '.book-info', '.svc-summary', 'body.embed .masthead']) {
+  if (!c.includes(s)) { console.log('css missing ' + s); process.exit(1); }
+}
+// no rounded corners (true circles excepted)
+if (/border-radius:\s*(?!50%)[1-9]/.test(c.replace(/border-radius:\s*50%/g, ''))) {
+  console.log('rounded edges found'); process.exit(1);
+}
+console.log('redesign wiring ok');
+EOF
+[ $? -eq 0 ] && ok "redesign: month calendar, two-pane booking, embed mode" || bad "redesign wiring"
 # 22: new UI wiring — capacity strip, returning hint, waitlist book button
 node << 'EOF'
 const fs = require('fs');

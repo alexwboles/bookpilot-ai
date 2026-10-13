@@ -9,14 +9,23 @@
 </head>
 <body>
 
+<div class="shell">
 <header class="masthead">
   <div class="mast-inner">
     <div class="brand">
       <span class="brand-mark" aria-hidden="true">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M8 2.5v4M16 2.5v4M3 10h18"/><circle cx="12" cy="15" r="2.2" fill="currentColor" stroke="none"/></svg>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16"/><path d="M8 2.5v4M16 2.5v4M3 10h18"/><circle cx="12" cy="15" r="2.2" fill="currentColor" stroke="none"/></svg>
       </span>
       <span class="brand-name">BookPilot <em>AI</em></span>
     </div>
+    <p class="mast-sub">Online booking for local service businesses. No accounts, no monthly fees — your calendar lives in your browser.</p>
+    <nav class="tabs" id="mainTabs" aria-label="Sections">
+      <button data-tab="book" class="active">Book online</button>
+      <button data-tab="bookings">Bookings</button>
+      <button data-tab="services">Services</button>
+      <button data-tab="hours">Hours &amp; blocked dates</button>
+      <button data-tab="widget">Embed widget</button>
+    </nav>
     <div class="mast-biz">
       <label class="sr" for="bizName">Business name</label>
       <input type="text" id="bizName" placeholder="Your business name" maxlength="60" autocomplete="off">
@@ -25,47 +34,43 @@
       <button class="btn ghost" id="resetDemo">Load demo data</button>
       <button class="btn danger" id="wipeAll">Erase everything</button>
     </div>
+    <p class="local-note"><i></i>Local only — data stays in this browser</p>
   </div>
-  <p class="mast-sub">Online booking for local service businesses. No accounts, no monthly fees — your calendar lives in your browser.</p>
 </header>
 
+<div class="mainwrap">
 <div class="wrap">
-
-  <nav class="tabs" id="mainTabs" aria-label="Sections">
-    <button data-tab="book" class="active"><span class="tab-ic" aria-hidden="true">◷</span>Book online</button>
-    <button data-tab="bookings"><span class="tab-ic" aria-hidden="true">▤</span>Bookings</button>
-    <button data-tab="services"><span class="tab-ic" aria-hidden="true">✂</span>Services</button>
-    <button data-tab="hours"><span class="tab-ic" aria-hidden="true">◐</span>Hours &amp; blocked dates</button>
-    <button data-tab="widget"><span class="tab-ic" aria-hidden="true">⧉</span>Embed widget</button>
-  </nav>
 
   <!-- Customer booking view (also used standalone via ?embed=1) -->
   <div class="tab active" id="tab-book">
     <div class="card book-card">
-      <div class="book-head">
-        <div>
-          <h2>Book an appointment</h2>
-          <p class="sub">Three steps, under a minute. Instant confirmation — no phone tag.</p>
-        </div>
-        <ol class="steps" id="bookSteps" aria-hidden="true">
-          <li class="step" data-step="1"><span class="step-n">1</span><span class="step-t">Service</span></li>
-          <li class="step" data-step="2"><span class="step-n">2</span><span class="step-t">Day &amp; time</span></li>
-          <li class="step" data-step="3"><span class="step-n">3</span><span class="step-t">Your details</span></li>
-        </ol>
-      </div>
-
       <div class="book-grid">
-        <div class="book-col">
+        <aside class="book-info">
+          <p class="kicker">Book an appointment</p>
+          <h2 id="bookBizName">Your business</h2>
+          <p class="sub">Three steps, under a minute. Instant confirmation — no phone tag.</p>
+          <div id="svcSummary" class="svc-summary"></div>
+          <div class="book-legend">
+            <p><strong>How booking works</strong></p>
+            <ol>
+              <li>Pick a service below.</li>
+              <li>Choose a highlighted day — the number is how many times are open.</li>
+              <li>Grab a time, add your details, done.</li>
+            </ol>
+          </div>
+        </aside>
+        <div class="book-main">
           <label for="bkService">Service</label>
           <select id="bkService"></select>
           <div id="svcCards" class="svc-cards"></div>
-          <div style="margin-top:14px">
-            <label for="bkDate">Date</label>
-            <input type="date" id="bkDate">
-            <button type="button" class="ghost small" id="bkNextAvail" style="margin-top:8px">Find next available →</button>
+          <div class="cal-head">
+            <button type="button" class="ghost small" id="calPrev" aria-label="Previous month">←</button>
+            <span id="calTitle" class="cal-title"></span>
+            <button type="button" class="ghost small" id="calNext" aria-label="Next month">→</button>
           </div>
-        </div>
-        <div class="book-col">
+          <div id="calGrid" class="cal-grid" role="grid" aria-label="Availability calendar"></div>
+          <input type="date" id="bkDate" style="display:none" aria-hidden="true" tabindex="-1">
+          <button type="button" class="ghost small" id="bkNextAvail" style="margin-top:10px">Find next available →</button>
           <div id="slotWrap" class="slot-panel"></div>
           <div id="bkForm" style="display:none">
             <div class="row">
@@ -102,6 +107,7 @@
     <div class="card">
       <div class="card-head">
         <div>
+          <p class="kicker">Front desk</p>
           <h2>Tomorrow's book</h2>
           <p class="sub">Day-before reminders are the cheapest no-show insurance you have.</p>
         </div>
@@ -214,6 +220,8 @@
   <footer class="foot">
     <p>BookPilot AI · free forever for one location · your data never leaves this browser</p>
   </footer>
+</div>
+</div>
 </div>
 
 <script src="js/logic.js"></script>

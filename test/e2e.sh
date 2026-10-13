@@ -190,6 +190,32 @@ const wl18 = B.waitlistEntry(st18, 'wl-1');
   wl18 && wl18.name === 'Jane' && B.waitlistEntry(st18, 'nope') === null)
   ? ok('flow18: repeat customer stats (phone-normalized) + waitlistEntry lookup') : bad('flow18 ' + JSON.stringify(cs18));
 
+// Flow 19: month-calendar availability scan (the same math renderCalendar uses)
+let st19 = fresh();
+st19.blockedDates = [{ date: '2026-10-14', note: 'Holiday' }];
+st19.hours[0] = null; // Sundays closed
+const todayStr19 = '2026-10-01';
+let openDays = 0, closedDays = 0, blockedDays = 0;
+for (let d = 1; d <= 31; d++) {
+  const ds = '2026-10-' + String(d).padStart(2, '0');
+  const dow = new Date(2026, 9, d).getDay();
+  const closed = !st19.hours[dow] || B.isBlocked(ds, st19.blockedDates.map(x => x.date));
+  if (ds < todayStr19) continue;
+  if (closed) { (ds === '2026-10-14' ? blockedDays++ : closedDays++); continue; }
+  const n = B.slotsFor(ds, svc, st19.hours, st19.blockedDates.map(x => x.date), st19.bookings,
+    { today: todayStr19, services: st19.services }).length;
+  if (n > 0) openDays++;
+}
+(openDays > 15 && closedDays >= 4 && blockedDays === 1)
+  ? ok('flow19: calendar scan — ' + openDays + ' open days, Sundays closed, 10-14 blocked')
+  : bad('flow19 open=' + openDays + ' closed=' + closedDays + ' blocked=' + blockedDays);
+
+// Flow 20: slot grouping boundaries (mirrors slotGroupLabel in app.js)
+const grp = (t) => t < 720 ? 'Morning' : (t < 1020 ? 'Afternoon' : 'Evening');
+(grp(540) === 'Morning' && grp(719) === 'Morning' && grp(720) === 'Afternoon' &&
+ grp(1019) === 'Afternoon' && grp(1020) === 'Evening')
+  ? ok('flow20: slot part-of-day grouping boundaries') : bad('flow20');
+
 console.log('');
 console.log('e2e: ' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
