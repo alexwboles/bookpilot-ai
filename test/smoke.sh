@@ -177,6 +177,25 @@ console.log('waitlist lifecycle ok');
 EOF
 [ $? -eq 0 ] && ok "waitlist: add, dup-reject, validation, remove, filter" || bad "waitlist"
 
+# 22: new UI wiring — capacity strip, returning hint, waitlist book button
+node << 'EOF'
+const fs = require('fs');
+const h = fs.readFileSync('/home/hatch/workspace/bookpilot-ai/index.html', 'utf8');
+const a = fs.readFileSync('/home/hatch/workspace/bookpilot-ai/js/app.js', 'utf8');
+const c = fs.readFileSync('/home/hatch/workspace/bookpilot-ai/css/style.css', 'utf8');
+for (const id of ['capacityStrip', 'bkReturning']) {
+  if (!h.includes('id="' + id + '"')) { console.log('missing ' + id); process.exit(1); }
+}
+for (const s of ['renderCapacity', 'renderReturning', 'B.customerStats(', 'B.weekUtilization(', 'B.waitlistEntry(', 'data-wl-book', 'ret-badge']) {
+  if (!a.includes(s)) { console.log('app missing ' + s); process.exit(1); }
+}
+for (const s of ['.cap-bar', '.ret-badge', '.returning']) {
+  if (!c.includes(s)) { console.log('css missing ' + s); process.exit(1); }
+}
+console.log('new sweep wiring ok');
+EOF
+[ $? -eq 0 ] && ok "capacity strip + returning customer + waitlist book wired" || bad "new sweep wiring"
+
 echo ""
 echo "smoke: $PASS passed, $FAIL failed"
 exit $FAIL

@@ -270,11 +270,25 @@
         selSlot = parseInt(btn.dataset.slot, 10);
         $('bkForm').style.display = 'block';
         $('bkResult').innerHTML = '';
+        renderReturning();
         setStep(3);
       });
     });
   }
 
+  // ---------- repeat-customer recognition ----------
+  function renderReturning() {
+    var host = $('bkReturning');
+    if (!host) return;
+    var cs = B.customerStats(state, $('bkPhone').value);
+    host.innerHTML = cs
+      ? '<span class="ret-badge">Returning customer</span> ' + cs.bookings + ' booking' +
+        (cs.bookings === 1 ? '' : 's') + ' · ' + cs.completed + ' completed · $' +
+        cs.totalSpent + ' lifetime' +
+        (cs.lastVisit ? ' · last visit ' + esc(B.fmtDate(cs.lastVisit)) : '')
+      : '';
+  }
+  $('bkPhone').addEventListener('input', renderReturning);
   $('bkService').addEventListener('change', function () { renderSvcCards(); renderBookingForm(); });
   $('bkDate').addEventListener('change', renderBookingForm);
 
@@ -297,6 +311,7 @@
       '<br><span class="muted">Your booking ref: <strong>' + esc(b.ref || B.bookingRef(b.id)) + '</strong> — keep it handy.</span></div>';
     $('bkForm').style.display = 'none';
     $('bkName').value = ''; $('bkPhone').value = ''; $('bkNotes').value = '';
+    renderReturning();
     renderSvcCards();
     renderBookingForm(); renderBookings(); renderStats(); renderSvcRevenue();
   });
@@ -322,8 +337,11 @@
     else {
       var html = '<table><tr><th>When</th><th>Customer</th><th>Service</th><th>Ref</th><th>Status</th><th>Actions</th></tr>';
       list.forEach(function (b) {
+        var cs = B.customerStats(state, b.phone);
         html += '<tr><td>' + esc(B.fmtDate(b.date)) + '<br><span class="muted">' + esc(B.fmtRange(b.start, b.end)) + '</span></td>' +
-          '<td>' + esc(b.name) + '<br><span class="muted">' + esc(b.phone) + '</span></td>' +
+          '<td>' + esc(b.name) +
+          (cs && cs.bookings > 1 ? ' <span class="ret-badge">returning · ' + cs.bookings + '</span>' : '') +
+          '<br><span class="muted">' + esc(b.phone) + '</span></td>' +
           '<td>' + esc(b.serviceName) + '<br><span class="muted">$' + b.price + '</span></td>' +
           '<td><span class="refcode">' + esc(b.ref || B.bookingRef(b.id)) + '</span></td>' +
           '<td><span class="pill ' + b.status + '">' + b.status + '</span></td><td>' +
@@ -391,7 +409,8 @@
         '<td>' + esc(w.name) + '<br><span class="muted">' + esc(w.phone) + '</span></td>' +
         '<td>' + esc(w.serviceName) + '</td>' +
         '<td>' + (open ? '<span class="pill confirmed">slot may be free</span>' : '<span class="muted">—</span>') + '</td>' +
-        '<td><button class="ghost small" data-wl-copy="' + w.id + '">Copy number</button> ' +
+        '<td>' + (open ? '<button class="primary small" data-wl-book="' + w.id + '">Book</button> ' : '') +
+        '<button class="ghost small" data-wl-copy="' + w.id + '">Copy number</button> ' +
         '<button class="danger small" data-wl-del="' + w.id + '">Remove</button></td></tr>';
     });
     host.innerHTML = html + '</table>';
@@ -399,6 +418,25 @@
       btn.addEventListener('click', function () {
         B.removeFromWaitlist(state, btn.dataset.wlDel);
         save(); renderWaitlist();
+      });
+    });
+    // One-click: book the freed slot for this waitlister — pre-fills the
+    // booking form and takes the owner straight to the slot grid.
+    host.querySelectorAll('[data-wl-book]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var w = B.waitlistEntry(state, btn.dataset.wlBook);
+        if (!w) return;
+        showTab('book');
+        $('bkService').value = w.serviceId;
+        renderSvcCards();
+        $('bkDate').value = w.date;
+        renderBookingForm();
+        $('bkName').value = w.name;
+        $('bkPhone').value = w.phone;
+        renderReturning();
+        $('bkResult').innerHTML = '<div class="notice">Booking for waitlist customer <strong>' + esc(w.name) +
+          '</strong> (' + esc(w.serviceName) + ' on ' + esc(B.fmtDate(w.date)) + ') — pick a time slot above.</div>';
+        window.scrollTo(0, 0);
       });
     });
     host.querySelectorAll('[data-wl-copy]').forEach(function (btn) {
@@ -505,6 +543,23 @@
       stat(s.completed, 'Completed') + stat(s.noShowRate + '%', 'No-show rate') +
       stat('$' + s.revenue, 'Revenue (completed)');
     function stat(n, l) { return '<div class="stat"><div class="n">' + n + '</div><div class="l">' + l + '</div></div>'; }
+    renderCapacity();
+  }
+
+  // 7-day capacity strip: how full each day is (booked incl. buffers vs open).
+  function renderCapacity() {
+    var host = $('capacityStrip');
+    if (!host) return;
+    var week = B.weekUtilization(state, B.todayStr());
+    host.innerHTML = '<div class="cap-h">Week capacity — booked vs open hours</div><div class="cap-row">' +
+      week.map(function (d) {
+        var label = B.fmtDate(d.date).split(',')[0];
+        var bar = d.openMin
+          ? '<div class="cap-bar"><span style="width:' + d.pct + '%"></span></div>'
+          : '<div class="cap-bar closed"></div>';
+        return '<div class="cap-day"><span class="cap-d">' + esc(label) + '</span>' + bar +
+          '<span class="cap-p">' + (d.openMin ? d.pct + '%' : 'closed') + '</span></div>';
+      }).join('') + '</div>';
   }
 
   // ---------- embed ----------

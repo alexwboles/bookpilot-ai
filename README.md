@@ -18,6 +18,9 @@ A single static page with two faces: a **customer booking widget** (service → 
 5. **Day-before reminders** — auto-flags tomorrow's un-reminded bookings; one-click copy of a personalized SMS reminder; tracks who was reminded.
 6. **No-show tracker + stats** — no-show rate, completed revenue, upcoming count.
 7. **Embed widget** — generates an iframe snippet (optionally locked to one service); `?embed=1` shows the customer view only.
+8. **Week capacity strip** — 7-day booked-vs-open-hours view (booked minutes include service buffers) in The numbers card, so slow days are obvious at a glance.
+9. **Returning-customer recognition** — typing a known phone number in the booking form shows visit count, completed visits, and lifetime spend; the owner ledger badges repeat customers.
+10. **Waitlist one-click book** — when a "slot may be free" flag shows, one tap pre-fills the whole booking form (service, date, name, phone) for that waitlister.
 
 ## Pricing vision
 Free forever for one location · **$19/mo Pro** (multi-staff calendars, SMS reminders sent automatically, online deposits) · $49/mo Multi-location.

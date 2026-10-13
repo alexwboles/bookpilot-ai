@@ -72,6 +72,7 @@
               <div><label for="bkName">Your name</label><input type="text" id="bkName" placeholder="Jane Doe" autocomplete="name"></div>
               <div><label for="bkPhone">Phone</label><input type="tel" id="bkPhone" placeholder="555-123-4567" autocomplete="tel"></div>
             </div>
+            <div id="bkReturning" class="returning" aria-live="polite"></div>
             <div style="margin-top:10px"><label for="bkNotes">Notes (optional)</label><input type="text" id="bkNotes" placeholder="Anything we should know?"></div>
             <div class="confirm-row"><button class="btn primary" id="bkConfirm">Confirm booking</button>
               <span class="fineprint">You'll get a reminder the day before.</span></div>
@@ -147,6 +148,7 @@
       <h2>The numbers</h2>
       <p class="sub">No-show rate is the number to watch — reminders are the cheapest fix.</p>
       <div class="stats" id="statsRow"></div>
+      <div id="capacityStrip" class="cap-strip" style="margin-top:14px"></div>
       <h3 class="form-title">Revenue by service</h3>
       <p class="sub">Completed bookings, attributed to the service menu.</p>
       <div id="svcRevenue"></div>

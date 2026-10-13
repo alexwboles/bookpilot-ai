@@ -355,8 +355,7 @@
   // Waitlist: customers join when a day is fully booked. The owner sees who
   // is waiting per service+date and can reach out when a slot frees up.
   // inp: { serviceId, date, name, phone }.
-  function addToWaitlist(state, inp) {
-    var errs = [];
+  function addToWaitlist(state, inp) {    var errs = [];
     var svc = getService(state.services, inp.serviceId);
     if (!svc) errs.push('Pick a service.');
     if (!inp.date || !/^\d{4}-\d{2}-\d{2}$/.test(inp.date)) errs.push('Pick a valid date.');
@@ -397,6 +396,59 @@
     }).sort(function (a, b) { return a.createdAt < b.createdAt ? -1 : 1; });
   }
 
+  // Waitlist entry by id (for the one-click "book this person" flow).
+  function waitlistEntry(state, id) {
+    var list = state.waitlist || [];
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+    return null;
+  }
+
+  // Day utilization: booked minutes (confirmed + completed, including each
+  // service's buffer) vs open minutes. Returns { openMin, bookedMin, pct }.
+  function dayUtilization(state, date) {
+    var dayHours = (state.hours || {})[weekdayOf(date)];
+    if (!dayHours || isBlocked(date, state.blockedDates)) return { openMin: 0, bookedMin: 0, pct: 0 };
+    var openMin = dayHours[1] - dayHours[0];
+    var bookedMin = 0;
+    (state.bookings || []).forEach(function (b) {
+      if (b.date !== date) return;
+      if (b.status !== 'confirmed' && b.status !== 'completed') return;
+      bookedMin += Math.max(0, b.end - b.start) + bufferOf(getService(state.services, b.serviceId));
+    });
+    return { openMin: openMin, bookedMin: bookedMin, pct: openMin ? Math.min(100, Math.round((bookedMin / openMin) * 100)) : 0 };
+  }
+
+  // Utilization for 7 days starting at refDate (default today).
+  function weekUtilization(state, refDate) {
+    var d = refDate || todayStr();
+    var out = [];
+    for (var i = 0; i < 7; i++) {
+      var u = dayUtilization(state, d);
+      u.date = d;
+      out.push(u);
+      d = addDays(d, 1);
+    }
+    return out;
+  }
+
+  // Repeat-customer recognition keyed by normalized phone:
+  // { bookings, completed, totalSpent, lastVisit } or null when unknown.
+  function customerStats(state, phone) {
+    var q = normalizePhone(phone);
+    if (q.length < 4) return null;
+    var hits = (state.bookings || []).filter(function (b) {
+      return normalizePhone(b.phone).indexOf(q) !== -1;
+    });
+    if (!hits.length) return null;
+    var completed = 0, spent = 0, last = '';
+    hits.forEach(function (b) {
+      if (b.status === 'completed') { completed++; spent += (b.price || 0); }
+      var key = b.date + pad5(b.start);
+      if (!last || key > last) last = key;
+    });
+    return { bookings: hits.length, completed: completed, totalSpent: spent, lastVisit: last.slice(0, 10) };
+  }
+
   return {
     STATUSES: STATUSES,
     DEFAULT_SERVICES: DEFAULT_SERVICES,
@@ -432,6 +484,10 @@
     bookingRef: bookingRef,
     addToWaitlist: addToWaitlist,
     removeFromWaitlist: removeFromWaitlist,
-    waitlistFor: waitlistFor
+    waitlistFor: waitlistFor,
+    waitlistEntry: waitlistEntry,
+    dayUtilization: dayUtilization,
+    weekUtilization: weekUtilization,
+    customerStats: customerStats
   };
 });

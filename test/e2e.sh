@@ -156,6 +156,40 @@ const msg16 = B.reminderMessage('Salon', bk);
 (/^B-[0-9A-Z]{4}$/.test(bk.ref) && csv16.indexOf(bk.ref) !== -1 && msg16.indexOf(bk.ref) !== -1)
   ? ok('flow16: ref on booking, in CSV export, and in reminder text (' + bk.ref + ')') : bad('flow16');
 
+// Flow 17: day utilization counts booked minutes (incl. buffers) vs open minutes
+const st17 = {
+  hours: B.defaultHours(), // Mon 9:00-17:00 = 480 open min
+  services: [{ id: 's1', name: 'Cut', durationMin: 30, price: 35, bufferMin: 10 }],
+  blockedDates: [],
+  bookings: [
+    { id: 'b1', serviceId: 's1', date: '2026-10-12', start: 540, end: 570, status: 'confirmed', price: 35 },
+    { id: 'b2', serviceId: 's1', date: '2026-10-12', start: 600, end: 630, status: 'completed', price: 35 },
+    { id: 'b3', serviceId: 's1', date: '2026-10-12', start: 700, end: 730, status: 'cancelled', price: 35 }
+  ]
+};
+const u17 = B.dayUtilization(st17, '2026-10-12');
+const u17closed = B.dayUtilization(st17, '2026-10-11'); // Sunday: closed
+const w17 = B.weekUtilization(st17, '2026-10-12');
+(u17.openMin === 480 && u17.bookedMin === 80 && u17.pct === 17 &&
+  u17closed.openMin === 0 && w17.length === 7)
+  ? ok('flow17: utilization = (30+10)*2 of 480 open min; closed day 0; week is 7 days') : bad('flow17 ' + JSON.stringify(u17));
+
+// Flow 18: customerStats recognizes repeat customers; waitlistEntry by id
+const st18 = {
+  bookings: [
+    { id: 'b1', name: 'Jane', phone: '555-123-4567', status: 'completed', price: 35, date: '2026-10-01', start: 540 },
+    { id: 'b2', name: 'Jane', phone: '(555) 123-4567', status: 'completed', price: 90, date: '2026-10-08', start: 600 },
+    { id: 'b3', name: 'Jane', phone: '555-123-4567', status: 'cancelled', price: 35, date: '2026-10-10', start: 540 }
+  ],
+  waitlist: [{ id: 'wl-1', serviceId: 's1', date: '2026-10-14', name: 'Jane', phone: '555-123-4567' }]
+};
+const cs18 = B.customerStats(st18, '5551234567');
+const wl18 = B.waitlistEntry(st18, 'wl-1');
+(cs18 && cs18.bookings === 3 && cs18.completed === 2 && cs18.totalSpent === 125 &&
+  cs18.lastVisit === '2026-10-10' && B.customerStats(st18, '999') === null &&
+  wl18 && wl18.name === 'Jane' && B.waitlistEntry(st18, 'nope') === null)
+  ? ok('flow18: repeat customer stats (phone-normalized) + waitlistEntry lookup') : bad('flow18 ' + JSON.stringify(cs18));
+
 console.log('');
 console.log('e2e: ' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
