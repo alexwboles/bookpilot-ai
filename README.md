@@ -21,9 +21,17 @@ A single static page with two faces: a **customer booking widget** (service → 
 8. **Week capacity strip** — 7-day booked-vs-open-hours view (booked minutes include service buffers) in The numbers card, so slow days are obvious at a glance.
 9. **Returning-customer recognition** — typing a known phone number in the booking form shows visit count, completed visits, and lifetime spend; the owner ledger badges repeat customers.
 10. **Waitlist one-click book** — when a "slot may be free" flag shows, one tap pre-fills the whole booking form (service, date, name, phone) for that waitlister.
+11. **Notifications over free channels** — browser notifications (permission-based, shown on open when reminders are due), phone push via the free [ntfy.sh](https://ntfy.sh) service (install the app, subscribe to your topic, push from the Bookings tab), and email reminders through **your own Gmail** via the included `tools/send-reminders.js` (OAuth2, documented setup, credentials in a gitignored config file — never hardcoded). No SMS: sending real text messages requires a paid gateway (Twilio and similar charge per message), which would break the free-forever model — so BookPilot deliberately does not implement SMS. The reminder box still offers one-click copy of the SMS text for sending from your own phone.
+12. **Multi-device sync** — everything lives in this browser's localStorage. Move it with a backup file (export/import, with automatic pre-import backup) or a **QR code transfer**: the Sync tab encodes the whole store into a QR code (compressed when the browser supports it); scan it with any QR reader app on the other device, copy the text, paste it into the Import box there. Large histories should use the backup file — QR codes hold a few thousand characters.
+13. **Multi-staff calendars** — team roster, per-service "who performs what" assignment, per-staff slot availability in the booking widget ("first available" matches the earliest free qualified person), staff filter on the bookings board, and a per-day/per-person schedule view. This works on one shared device (front-desk tablet / shop computer).
+14. **Customer email (optional)** — bookings can carry an email address; it flows into the CSV export and powers the Gmail reminder tool above.
 
 ## Pricing vision
-Free forever for one location · **$19/mo Pro** (multi-staff calendars, SMS reminders sent automatically, online deposits) · $49/mo Multi-location.
+Free forever for one location, including multi-staff calendars and all notification channels above · **$19/mo Pro** (online deposits, review-request automation) · $49/mo Multi-location.
+
+## Honest limits
+- **Live multi-device / multi-user concurrency is out of scope.** Two devices can each hold a copy and hand data back and forth (export/import/QR), but there is no live shared calendar — that needs a server, which needs hosting, which costs money. The sync tools here are the free answer; a hosted realtime backend is not.
+- **No automatic SMS.** Same reason: every real SMS gateway is pay-per-message. The day-before reminder flow (copy text, ntfy push, Gmail tool) covers the job without it.
 
 ## Run it
 No build step. Open `index.html` in a browser, or:
@@ -36,17 +44,35 @@ Append `?embed=1` for the customer-only widget view.
 
 ## Tests
 ```bash
-bash test/smoke.sh   # 12 checks: files, syntax, slots, booking, blocked dates, reminders, stats, embed
-bash test/e2e.sh     # 8 end-to-end flows in Node against js/logic.js
+bash test/smoke.sh   # 74 checks: files, syntax, slots, booking, blocked dates, reminders, stats, embed, staff, sync, QR, notifications, gmail tool
+bash test/e2e.sh     # 27 end-to-end flows in Node against js/logic.js
 ```
+
+## Multi-device sync flow
+1. This device: Sync tab -> Show QR code (or Download backup for large histories).
+2. Other device: scan the QR with any QR reader app -> copy the text -> open BookPilot -> Sync tab -> paste into the transfer box -> Import -> confirm.
+3. Your current data is backed up automatically before anything is replaced.
+
+## Email reminders (Gmail, free)
+Bookings with an email address can get day-before reminders sent from your
+Gmail account - no paid email service. One-time Google Cloud setup (about 5 min),
+then:
+```bash
+node tools/send-reminders.js --store bookpilot-backup-2026-10-19.json --apply
+```
+Full setup in `tools/README.md`. Credentials live in `tools/gmail-config.json`
+(gitignored, never committed).
 
 ## Architecture
 ```
 index.html        customer booking tab + owner tabs (single page)
-css/style.css     theme (teal accent), cards, slot grid, pills
+css/style.css     theme (appointment-book identity), cards, slot grid, pills
 js/logic.js       pure scheduling logic (UMD: Node + browser)
+js/qrcodegen.js   vendored Nayuki QR-Code-generator v1.6.0 (MIT), type-stripped
 js/app.js         DOM wiring + localStorage persistence (key: bookpilot-ai-v1)
-test/smoke.sh     file/syntax/logic checks
-test/e2e.sh       8 user-journey flows in Node
+tools/            send-reminders.js (Gmail OAuth reminder sender, zero deps)
+test/smoke.sh     file/syntax/logic/UI-wiring checks
+test/e2e.sh       27 user-journey flows in Node
 ```
-All logic is dependency-free and offline-capable. Data never leaves the browser.
+All logic is dependency-free and offline-capable. Data never leaves the browser
+(ntfy.sh pushes and Gmail sends are explicit owner actions).

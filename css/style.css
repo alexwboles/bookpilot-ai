@@ -352,3 +352,18 @@ body.embed .foot { display: none; }
   .toolbar { grid-template-columns: 1fr; }
   table { font-size: 13px; }
 }
+
+/* ============ notifications / team / sync (expansion) ============ */
+.notif-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-top: 12px; }
+.notif-box { border: 1px solid var(--line); background: var(--paper); padding: 16px 18px; }
+.notif-box h3 { margin: 0 0 6px; font-size: 16px; }
+.notif-box .small { font-size: 13px; }
+.checkline { display: flex; gap: 8px; align-items: center; margin-top: 12px; font-size: 14px; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--ink-soft); }
+.checkline input { width: auto; margin: 0; }
+#qrCanvas { border: 1px solid var(--line); background: #fff; padding: 12px; image-rendering: pixelated; max-width: 100%; }
+#syncPaste { font-family: var(--mono); font-size: 12px; }
+#staffMatrix td:not(:first-child), #staffMatrix th:not(:first-child) { text-align: center; }
+#staffMatrix input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--green); }
+@media (max-width: 860px) {
+  .notif-grid { grid-template-columns: 1fr; }
+}

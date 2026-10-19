@@ -216,6 +216,55 @@ const grp = (t) => t < 720 ? 'Morning' : (t < 1020 ? 'Afternoon' : 'Evening');
  grp(1019) === 'Afternoon' && grp(1020) === 'Evening')
   ? ok('flow20: slot part-of-day grouping boundaries') : bad('flow20');
 
+// Flow 21: multi-staff booking isolation end to end
+st = fresh();
+const maya = B.addStaffMember(st, 'Maya').member;
+const leo = B.addStaffMember(st, 'Leo').member;
+B.setServiceStaff(st, 's1', [maya.id, leo.id]);
+const m1 = B.bookSlot(st, { serviceId: 's1', date: '2026-10-05', start: 540, name: 'M1', phone: '1', staffId: maya.id });
+const m2 = B.bookSlot(st, { serviceId: 's1', date: '2026-10-05', start: 540, name: 'L1', phone: '2', staffId: leo.id });
+const m3 = B.bookSlot(st, { serviceId: 's1', date: '2026-10-05', start: 540, name: 'M2', phone: '3', staffId: maya.id });
+const badStaff = B.bookSlot(st, { serviceId: 's1', date: '2026-10-05', start: 600, name: 'X', phone: '4', staffId: 'nope' });
+(m1.ok && m2.ok && !m3.ok && !badStaff.ok && /Unknown team member/.test(badStaff.error))
+  ? ok('flow21: same 9:00 slot bookable by Maya AND Leo, not twice by Maya; unknown staff rejected')
+  : bad('flow21');
+
+// Flow 22: first-available matching + per-staff day schedule
+const fa22 = B.firstAvailable(st, svc, '2026-10-05', { today: '2026-09-28', nowMin: 0 });
+const schedM = B.staffDaySchedule(st, '2026-10-05', maya.id);
+const schedL = B.staffDaySchedule(st, '2026-10-05', leo.id);
+(fa22 && fa22.start === 570 && fa22.staffId === maya.id && schedM.length === 1 && schedM[0].name === 'M1' &&
+  schedL.length === 1 && schedL[0].name === 'L1')
+  ? ok('flow22: first-available -> 9:30 with Maya (both busy at 9:00, roster order wins ties); day schedules split by staff')
+  : bad('flow22 ' + JSON.stringify(fa22));
+
+// Flow 23: export -> import round trip keeps staff, services, bookings, settings
+const exp23 = B.exportStore(st);
+const imp23 = B.importStore(exp23);
+const pay23 = B.syncPayload(st);
+const impPay23 = B.importStore(pay23.payload);
+const badImp = B.importStore('not json at all');
+(imp23.ok && imp23.state.staff.length === 2 && imp23.state.bookings.length === 2 &&
+  imp23.state.bookings[0].staffId === maya.id && impPay23.ok &&
+  impPay23.state.services[0].staffIds.length === 2 && !badImp.ok)
+  ? ok('flow23: export/import + QR payload preserve staff links; garbage rejected')
+  : bad('flow23');
+
+// Flow 24: ntfy digest and reminder message carry the staff name; email flows into CSV
+st = fresh();
+B.addStaffMember(st, 'Maya');
+const sid = st.staff[0].id;
+B.setServiceStaff(st, 's1', [sid]);
+B.bookSlot(st, { serviceId: 's1', date: '2026-10-20', start: 540, name: 'Jane', phone: '555-1', email: 'jane@example.com', staffId: sid });
+const due24 = B.dayBeforeList(st, '2026-10-19');
+const digest24 = B.ntfyReminderText('Salon', due24, st);
+const msg24 = B.reminderMessage('Salon', due24[0], 'Maya');
+const csv24 = B.bookingsToCSV(st);
+(due24.length === 1 && digest24.indexOf('with Maya') !== -1 && msg24.indexOf('with Maya') !== -1 &&
+  csv24.indexOf('jane@example.com') !== -1 && csv24.indexOf('Maya') !== -1)
+  ? ok('flow24: ntfy digest + reminder + CSV all carry staff name and customer email')
+  : bad('flow24');
+
 console.log('');
 console.log('e2e: ' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

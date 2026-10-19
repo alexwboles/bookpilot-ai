@@ -22,8 +22,10 @@
     <nav class="tabs" id="mainTabs" aria-label="Sections">
       <button data-tab="book" class="active">Book online</button>
       <button data-tab="bookings">Bookings</button>
+      <button data-tab="team">Team</button>
       <button data-tab="services">Services</button>
       <button data-tab="hours">Hours &amp; blocked dates</button>
+      <button data-tab="sync">Sync &amp; transfer</button>
       <button data-tab="widget">Embed widget</button>
     </nav>
     <div class="mast-biz">
@@ -83,6 +85,10 @@
               <div><label for="bkPhone">Phone</label><input type="tel" id="bkPhone" placeholder="555-123-4567" autocomplete="tel"></div>
             </div>
             <div id="bkReturning" class="returning" aria-live="polite"></div>
+            <div class="row" style="margin-top:10px">
+              <div><label for="bkStaff">Team member</label><select id="bkStaff"></select></div>
+              <div><label for="bkEmail">Email (optional)</label><input type="email" id="bkEmail" placeholder="you@example.com" autocomplete="email"></div>
+            </div>
             <div style="margin-top:10px"><label for="bkNotes">Notes (optional)</label><input type="text" id="bkNotes" placeholder="Anything we should know?"></div>
             <div class="confirm-row"><button class="btn primary" id="bkConfirm">Confirm booking</button>
               <span class="fineprint">You'll get a reminder the day before.</span></div>
@@ -109,6 +115,45 @@
 
   <!-- Owner bookings view -->
   <div class="tab" id="tab-bookings">
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <p class="kicker">Free channels</p>
+          <h2>Notifications</h2>
+          <p class="sub">Get reminded without opening the app — over free channels only. BookPilot sends no SMS itself: real texting needs a paid gateway, so it stays out (see below).</p>
+        </div>
+      </div>
+      <div class="notif-grid">
+        <div class="notif-box">
+          <h3>Browser notifications</h3>
+          <p class="sub">Free. Shows a system notification on this device when you open BookPilot and reminders are due.</p>
+          <div id="webNotifStatus" class="muted small"></div>
+          <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">
+            <button class="btn ghost small" id="notifEnable">Enable notifications</button>
+            <button class="btn ghost small" id="notifTest">Send test</button>
+          </div>
+          <label class="checkline"><input type="checkbox" id="notifAuto"> Notify me on open when reminders are due</label>
+        </div>
+        <div class="notif-box">
+          <h3>Phone push via ntfy.sh</h3>
+          <p class="sub">Free. Install the ntfy app, subscribe to your topic, and push reminders to your phone from here.</p>
+          <div><label for="ntfyTopic">Topic (pick something unguessable)</label>
+          <input type="text" id="ntfyTopic" placeholder="e.g. bookpilot-x7q2-salon" autocomplete="off"></div>
+          <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">
+            <button class="btn ghost small" id="ntfySave">Save topic</button>
+            <button class="btn ghost small" id="ntfyTest">Send test push</button>
+            <button class="btn primary small" id="ntfyPushDue">Push due reminders</button>
+          </div>
+          <div id="ntfyStatus" class="muted small" style="margin-top:8px"></div>
+        </div>
+        <div class="notif-box">
+          <h3>Email reminders</h3>
+          <p class="sub">Free via your own Gmail. Bookings can carry an email address; the included tool sends day-before reminders with your Gmail account — no password ever stored in the app.</p>
+          <p class="small">Run <code>node tools/send-reminders.js</code> — setup takes a few minutes, documented in <code>tools/README.md</code>.</p>
+          <p class="muted small">Why no built-in SMS? Sending real text messages requires a paid gateway (Twilio and similar charge per message). BookPilot stays free by using channels that cost nothing: browser notifications, ntfy.sh push, and your own Gmail.</p>
+        </div>
+      </div>
+    </div>
     <div class="card">
       <div class="card-head">
         <div>
@@ -142,6 +187,12 @@
               <option value="cancelled">Cancelled</option>
             </select>
           </div>
+          <div><label for="fltStaff">Team member</label>
+            <select id="fltStaff">
+              <option value="">Everyone</option>
+              <option value="unassigned">Unassigned</option>
+            </select>
+          </div>
         </div>
       </div>
       <div id="bookingsTable"></div>
@@ -163,6 +214,43 @@
       <h3 class="form-title">Revenue by service</h3>
       <p class="sub">Completed bookings, attributed to the service menu.</p>
       <div id="svcRevenue"></div>
+    </div>
+  </div>
+
+  <!-- Team (multi-staff) -->
+  <div class="tab" id="tab-team">
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <p class="kicker">Multi-staff</p>
+          <h2>Team</h2>
+          <p class="sub">Add the people who take bookings. Assign each service to the team members who perform it — the calendar then shows each person's real availability. Works on this device (front desk / shared tablet).</p>
+        </div>
+      </div>
+      <div class="row" style="grid-template-columns: 1fr auto; align-items:end">
+        <div><label for="staffName">Team member name</label><input type="text" id="staffName" placeholder="e.g. Maya" maxlength="60" autocomplete="off"></div>
+        <div><button class="btn primary" id="staffAdd">Add</button></div>
+      </div>
+      <div id="staffList" style="margin-top:14px"></div>
+    </div>
+    <div class="card">
+      <h2>Who performs what</h2>
+      <p class="sub">Tick the team members who perform each service. Services with nobody ticked can be booked with anyone. "First available" matches the customer to the earliest free qualified person.</p>
+      <div id="staffMatrix"></div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <h2>Day schedule</h2>
+          <p class="sub">The day per team member — who is booked when.</p>
+        </div>
+      </div>
+      <div class="row" style="grid-template-columns: 1fr 1fr auto; align-items:end">
+        <div><label for="schedDate">Date</label><input type="date" id="schedDate"></div>
+        <div><label for="schedStaff">Team member</label><select id="schedStaff"></select></div>
+        <div><button class="btn ghost" id="schedToday">Today</button></div>
+      </div>
+      <div id="schedView" style="margin-top:14px"></div>
     </div>
   </div>
 
@@ -207,6 +295,43 @@
     </div>
   </div>
 
+  <!-- Sync & transfer (multi-device) -->
+  <div class="tab" id="tab-sync">
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <p class="kicker">Multi-device</p>
+          <h2>Sync &amp; transfer</h2>
+          <p class="sub">BookPilot keeps everything in this browser. Move it to another device with a backup file or a QR code — no account, no cloud, nothing uploaded anywhere.</p>
+        </div>
+      </div>
+      <h3 class="form-title">Backup file</h3>
+      <p class="sub">Download a full backup, or restore one. Restoring replaces everything here — a backup of the current data downloads automatically first, so you can always go back.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <button class="btn primary" id="syncExport">Download backup</button>
+        <label class="btn ghost" for="syncFile" style="cursor:pointer;margin:0">Import backup file…</label>
+        <input type="file" id="syncFile" accept=".json,application/json" style="display:none">
+      </div>
+      <h3 class="form-title" style="margin-top:22px">Paste transfer text</h3>
+      <p class="sub">Paste a transfer code (from a QR scan or copied transfer text) to import it.</p>
+      <textarea id="syncPaste" rows="4" placeholder="Paste transfer text or backup JSON here…" style="width:100%;font-family:var(--mono);font-size:12px"></textarea>
+      <div style="margin-top:10px"><button class="btn primary" id="syncImportPaste">Import pasted data</button></div>
+      <div id="syncImportResult" style="margin-top:12px"></div>
+    </div>
+    <div class="card">
+      <h2>QR transfer</h2>
+      <p class="sub">Show a QR code of your booking data. On the other device: scan it with any QR reader app, copy the text, open BookPilot there, and paste it into the box above.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <button class="btn primary" id="qrShow">Show QR code</button>
+        <button class="btn ghost" id="qrCopy" style="display:none">Copy transfer text</button>
+        <span class="muted small" id="qrMeta"></span>
+      </div>
+      <div id="qrWarn" style="margin-top:12px"></div>
+      <div style="margin-top:14px"><canvas id="qrCanvas" style="display:none"></canvas></div>
+      <p class="muted small" style="margin-top:10px">Tip: a QR code holds a few thousand characters. Large booking histories should use the backup file instead.</p>
+    </div>
+  </div>
+
   <!-- Embed widget -->
   <div class="tab" id="tab-widget">
     <div class="card">
@@ -230,6 +355,7 @@
 </div>
 
 <script src="js/logic.js"></script>
+<script src="js/qrcodegen.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

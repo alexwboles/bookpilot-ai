@@ -8,14 +8,16 @@ bad()  { FAIL=$((FAIL+1)); echo "  FAIL: $1"; }
 
 echo "== bookpilot-ai smoke =="
 
-# 1-5: files exist
-for f in index.html css/style.css js/logic.js js/app.js README.md; do
+# 1-6: files exist
+for f in index.html css/style.css js/logic.js js/app.js js/qrcodegen.js README.md tools/send-reminders.js tools/README.md tools/gmail-config.example.json; do
   if [ -f "$f" ]; then ok "file exists: $f"; else bad "missing file: $f"; fi
 done
 
-# 6-7: JS syntax
+# 7-9: JS syntax
 if node --check js/logic.js 2>/dev/null; then ok "logic.js syntax"; else bad "logic.js syntax"; fi
 if node --check js/app.js 2>/dev/null; then ok "app.js syntax"; else bad "app.js syntax"; fi
+if node --check js/qrcodegen.js 2>/dev/null; then ok "qrcodegen.js syntax"; else bad "qrcodegen.js syntax"; fi
+if node --check tools/send-reminders.js 2>/dev/null; then ok "send-reminders.js syntax"; else bad "send-reminders.js syntax"; fi
 
 # 8-12: logic checks in Node
 node << 'EOF'
@@ -84,7 +86,7 @@ B.bookSlot(st, { serviceId: 's1', date: '2026-10-06', start: 600, name: 'Bob', p
 // 13: bookings CSV export — header, row count, comma-in-name escaped
 const csv = B.bookingsToCSV(st);
 const lines = csv.split('\r\n');
-(lines.length === 3 && lines[0] === 'Ref,Date,Time,Customer,Phone,Service,Duration (min),Price,Status,Notes' && /"Jane, Jr\."/.test(lines[1]) && /Bob/.test(lines[2]) && /^B-[0-9A-Z]{4},/.test(lines[1]))
+(lines.length === 3 && lines[0] === 'Ref,Date,Time,Customer,Phone,Email,Service,Team member,Duration (min),Price,Status,Notes' && /"Jane, Jr\."/.test(lines[1]) && /Bob/.test(lines[2]) && /^B-[0-9A-Z]{4},/.test(lines[1]))
   ? ok('bookingsToCSV: header + 2 rows, comma name quoted, ref column present') : bad('csv=' + csv.slice(0, 140));
 
 // 14: search — by name (case-insensitive), by phone digits, empty q returns all
@@ -127,9 +129,15 @@ EOF
 [ $? -eq 0 ] && ok "new-feature node checks" || bad "new-feature node checks"
 
 # 18: new DOM ids present in index.html
-for id in fltSearch exportCsv svcRevenue bkNextAvail lkPhone lkFind lkResults waitlistBox svcBuf; do
+for id in fltSearch exportCsv svcRevenue bkNextAvail lkPhone lkFind lkResults waitlistBox svcBuf bkStaff bkEmail fltStaff staffName staffAdd staffList staffMatrix schedDate schedStaff schedToday schedView syncExport syncFile syncPaste syncImportPaste syncImportResult qrShow qrCopy qrMeta qrWarn qrCanvas notifEnable notifTest notifAuto ntfyTopic ntfySave ntfyTest ntfyPushDue ntfyStatus webNotifStatus; do
   if grep -q "id=\"$id\"" index.html; then ok "index.html has #$id"; else bad "index.html missing #$id"; fi
 done
+for tab in team sync; do
+  if grep -q "id=\"tab-$tab\"" index.html; then ok "index.html has #tab-$tab"; else bad "index.html missing #tab-$tab"; fi
+  if grep -q "data-tab=\"$tab\"" index.html; then ok "nav has data-tab=$tab"; else bad "nav missing data-tab=$tab"; fi
+done
+# qrcodegen vendored + loaded before app.js
+if grep -q 'src="js/qrcodegen.js"' index.html; then ok "index.html loads js/qrcodegen.js"; else bad "index.html missing qrcodegen script tag"; fi
 
 # 19: buffer time blocks cleanup windows in the slot grid
 node << 'EOF'
@@ -234,6 +242,137 @@ for (const s of ["setStep(1)", "setStep(2)", "setStep(3)", ".book-steps"]) {
 console.log('step rail wiring ok');
 EOF
 [ $? -eq 0 ] && ok "booking step rail (#bookSteps, 3 steps, styles) wired" || bad "step rail wiring"
+
+# 24: multi-staff logic — roster, eligibility, per-staff slot isolation, first-available
+node << 'EOF'
+const B = require('/home/hatch/workspace/bookpilot-ai/js/logic.js');
+let pass = 0, fail = 0;
+const ok = (m) => { pass++; console.log('  PASS: ' + m); };
+const bad = (m) => { fail++; console.log('  FAIL: ' + m); };
+const st = { services: [{ id: 's1', name: 'Cut', durationMin: 30, price: 35 }], hours: B.defaultHours(), blockedDates: [], bookings: [], staff: [] };
+const a = B.addStaffMember(st, 'Maya');
+const b = B.addStaffMember(st, 'Leo');
+const dup = B.addStaffMember(st, 'maya');
+const empty = B.addStaffMember(st, '  ');
+(a.ok && b.ok && !dup.ok && !empty.ok && B.staffList(st).length === 2) ? ok('addStaffMember: 2 added, dup + blank rejected') : bad('addStaff');
+B.setServiceStaff(st, 's1', [a.member.id]);
+const elig = B.eligibleStaff(st, st.services[0]);
+(elig.length === 1 && elig[0].name === 'Maya') ? ok('eligibleStaff: only Maya performs Cut') : bad('elig');
+// Maya books 9:00; Leo (not eligible) cannot book the service at all; Maya's 9:00 is taken for her but free for nobody else eligible
+const r1 = B.bookSlot(st, { serviceId: 's1', date: '2026-10-05', start: 540, name: 'A', phone: '1', staffId: a.member.id });
+const rLeo = B.bookSlot(st, { serviceId: 's1', date: '2026-10-05', start: 600, name: 'B', phone: '2', staffId: b.member.id });
+const rDup = B.bookSlot(st, { serviceId: 's1', date: '2026-10-05', start: 540, name: 'C', phone: '3', staffId: a.member.id });
+(r1.ok && r1.booking.staffId === a.member.id && !rLeo.ok && !rDup.ok) ? ok('bookSlot: staff assignment stored; ineligible staff rejected; double-book per staff rejected') : bad('staff booking');
+// per-staff availability: Maya's 9:00 gone for Maya, but a second eligible staffer would still show it
+B.setServiceStaff(st, 's1', [a.member.id, b.member.id]);
+const mayaSlots = B.slotsForStaff('2026-10-05', st.services[0], a.member.id, st, { today: '2026-09-28', nowMin: 0 });
+const leoSlots = B.slotsForStaff('2026-10-05', st.services[0], b.member.id, st, { today: '2026-09-28', nowMin: 0 });
+(mayaSlots.indexOf(540) === -1 && leoSlots.indexOf(540) !== -1) ? ok('slotsForStaff: booking blocks only its own staff member') : bad('isolation');
+// first-available picks earliest free qualified person
+const fa = B.firstAvailable(st, st.services[0], '2026-10-05', { today: '2026-09-28', nowMin: 0 });
+(fa && fa.staffId === b.member.id && fa.start === 540) ? ok('firstAvailable: Leo at 9:00 (Maya busy)') : bad('fa=' + JSON.stringify(fa));
+// unassigned booking blocks everyone
+const rU = B.bookSlot(st, { serviceId: 's1', date: '2026-10-06', start: 540, name: 'U', phone: '9' });
+const leoAfter = B.slotsForStaff('2026-10-06', st.services[0], b.member.id, st, { today: '2026-09-28', nowMin: 0 });
+(rU.ok && rU.booking.staffId === null && leoAfter.indexOf(540) === -1) ? ok('unassigned booking blocks all staff') : bad('unassigned');
+// staff day schedule + removal unassigns
+const sched = B.staffDaySchedule(st, '2026-10-05', a.member.id);
+const n = B.removeStaffMember(st, a.member.id);
+(sched.length === 1 && sched[0].name === 'A' && n === 1 && B.staffList(st).length === 1 && st.bookings[0].staffId === null)
+  ? ok('staffDaySchedule + removeStaffMember unassigns bookings') : bad('schedule/remove');
+// email validation + storage
+const rBadEmail = B.bookSlot(st, { serviceId: 's1', date: '2026-10-06', start: 600, name: 'E', phone: '5', email: 'not-an-email' });
+const rEmail = B.bookSlot(st, { serviceId: 's1', date: '2026-10-06', start: 660, name: 'E2', phone: '6', email: 'e2@example.com' });
+(!rBadEmail.ok && rEmail.ok && rEmail.booking.email === 'e2@example.com') ? ok('email: invalid rejected, valid stored') : bad('email');
+console.log('staff node checks: ' + pass + ' passed, ' + fail + ' failed');
+process.exit(fail ? 1 : 0);
+EOF
+[ $? -eq 0 ] && ok "multi-staff: roster, eligibility, isolation, first-available, email" || bad "multi-staff logic"
+
+# 25: blocked dates stored as objects are honored everywhere (regression)
+node << 'EOF'
+const B = require('/home/hatch/workspace/bookpilot-ai/js/logic.js');
+const st = { services: [{ id: 's1', name: 'Cut', durationMin: 30, price: 35 }], hours: B.defaultHours(), blockedDates: [{ date: '2026-10-06', note: 'Holiday' }], bookings: [] };
+const s = B.slotsFor('2026-10-06', st.services[0], st.hours, st.blockedDates, [], { today: '2026-10-05', nowMin: 0 });
+const nx = B.nextOpenDates(st, 's1', 2, '2026-10-05').map(o => o.date);
+const u = B.dayUtilization(st, '2026-10-06');
+const rb = B.bookSlot(st, { serviceId: 's1', date: '2026-10-06', start: 540, name: 'X', phone: '1' });
+if (s.length !== 0) { console.log('slotsFor not blocked'); process.exit(1); }
+if (JSON.stringify(nx) !== JSON.stringify(['2026-10-05', '2026-10-07'])) { console.log('nextOpenDates: ' + JSON.stringify(nx)); process.exit(1); }
+if (u.openMin !== 0) { console.log('dayUtilization not zeroed'); process.exit(1); }
+if (rb.ok) { console.log('bookSlot on blocked date allowed'); process.exit(1); }
+console.log('object blocked dates honored in slots/next-open/utilization/booking');
+EOF
+[ $? -eq 0 ] && ok "blocked-date objects honored everywhere" || bad "blocked-date objects"
+
+# 26: sync — export/import round-trip, QR payload, BP1: import
+node << 'EOF'
+const B = require('/home/hatch/workspace/bookpilot-ai/js/logic.js');
+const st = { bizName: 'Test Salon', services: [{ id: 's1', name: 'Cut', durationMin: 30, price: 35 }], hours: B.defaultHours(), blockedDates: [], bookings: [], waitlist: [], staff: [], settings: { ntfyTopic: 'x' } };
+B.bookSlot(st, { serviceId: 's1', date: '2026-10-05', start: 540, name: 'A', phone: '1' });
+const exp = B.exportStore(st);
+const imp = B.importStore(exp);
+if (!imp.ok || imp.state.bookings.length !== 1 || imp.state.settings.ntfyTopic !== 'x' || imp.meta.bookings !== 1) { console.log('roundtrip failed'); process.exit(1); }
+const p = B.syncPayload(st);
+if (!p.ok || p.encoding !== 'BP1' || p.payload.slice(0, 4) !== 'BP1:') { console.log('payload failed'); process.exit(1); }
+const imp2 = B.importStore(p.payload);
+if (!imp2.ok || imp2.state.bookings.length !== 1) { console.log('payload import failed'); process.exit(1); }
+if (B.importStore('garbage').ok || B.importStore('').ok || B.importStore('{"app":"other"}').ok) { console.log('bad input accepted'); process.exit(1); }
+// oversized store is refused with a clear message
+const big = JSON.parse(JSON.stringify(st));
+for (let i = 0; i < 200; i++) big.bookings.push({ id: 'b' + i, name: 'X'.repeat(50), phone: '1', serviceId: 's1', date: '2026-10-05', start: 540, end: 570, status: 'confirmed' });
+const pb = B.syncPayload(big);
+if (pb.ok) { console.log('oversize not refused'); process.exit(1); }
+console.log('export/import round-trip ok; BP1: payload imports; oversize refused');
+EOF
+[ $? -eq 0 ] && ok "sync: export/import round-trip, QR payload, oversize guard" || bad "sync logic"
+
+# 27: QR library — vendored, exposes QRCodeGen, encodes with correct structure
+node << 'EOF'
+const fs = require('fs');
+const self = {};
+new Function('self', fs.readFileSync('/home/hatch/workspace/bookpilot-ai/js/qrcodegen.js', 'utf8'))(self);
+const QRC = self.QRCodeGen;
+if (!QRC || !QRC.QrCode || !QRC.QrSegment) { console.log('QRCodeGen not exposed'); process.exit(1); }
+const qr = QRC.QrCode.encodeText('BP1:dGVzdA', QRC.QrCode.Ecc.QUARTILE);
+if (qr.size < 21 || qr.size > 177) { console.log('bad size ' + qr.size); process.exit(1); }
+// finder pattern sanity: 7x7 dark border rows/cols at top-left
+let finderOK = true;
+for (let d = 0; d < 7; d++) {
+  if (!qr.getModule(d, 0) || !qr.getModule(0, d) || !qr.getModule(d, 6) || !qr.getModule(6, d)) finderOK = false;
+}
+if (!finderOK) { console.log('finder broken'); process.exit(1); }
+// realistic payload size: a small store must fit comfortably
+const B = require('/home/hatch/workspace/bookpilot-ai/js/logic.js');
+const st = { services: [{ id: 's1', name: 'Cut', durationMin: 30, price: 35 }], hours: B.defaultHours(), blockedDates: [], bookings: [], staff: [] };
+B.bookSlot(st, { serviceId: 's1', date: '2026-10-05', start: 540, name: 'A', phone: '1' });
+const p = B.syncPayload(st);
+const qr2 = QRC.QrCode.encodeText(p.payload, QRC.QrCode.Ecc.QUARTILE);
+console.log('QR ok: ' + p.bytes + ' chars -> version ' + qr2.version + ' (' + qr2.size + 'x' + qr2.size + ')');
+EOF
+[ $? -eq 0 ] && ok "qrcodegen: encodes payloads with valid structure" || bad "qrcodegen"
+
+# 28: ntfy digest + reminder message with staff name
+node << 'EOF'
+const B = require('/home/hatch/workspace/bookpilot-ai/js/logic.js');
+const st = { services: [{ id: 's1', name: 'Cut', durationMin: 30, price: 35 }], hours: B.defaultHours(), blockedDates: [], bookings: [], staff: [{ id: 'st-1', name: 'Maya' }] };
+B.bookSlot(st, { serviceId: 's1', date: '2026-10-20', start: 540, name: 'Jane', phone: '555-1', staffId: 'st-1' });
+const due = B.dayBeforeList(st, '2026-10-19');
+const txt = B.ntfyReminderText('Salon', due, st);
+const msg = B.reminderMessage('Salon', due[0], 'Maya');
+if (due.length !== 1 || txt.indexOf('with Maya') === -1 || txt.indexOf('Jane') === -1 || msg.indexOf('with Maya') === -1) {
+  console.log('ntfy/message wrong: ' + txt.slice(0, 100)); process.exit(1);
+}
+console.log('ntfy digest + staff reminder message ok');
+EOF
+[ $? -eq 0 ] && ok "ntfy digest + staff-aware reminder message" || bad "notifications logic"
+
+# 29: gmail tool — config example is a template (no real credentials), real config gitignored
+if grep -q "PASTE_YOUR_CLIENT_ID" tools/gmail-config.example.json; then ok "gmail-config.example.json is an unfilled template"; else bad "example config looks filled in"; fi
+if [ -f tools/gmail-config.json ]; then bad "tools/gmail-config.json exists in repo (must stay gitignored)"; else ok "no real gmail-config.json committed"; fi
+if grep -q "tools/gmail-config.json" .gitignore; then ok ".gitignore covers tools/gmail-config.json"; else bad ".gitignore missing gmail-config.json"; fi
+# tool refuses to run without config, cleanly
+if node tools/send-reminders.js --store /tmp/does-not-exist.json 2>&1 | grep -q "no config found"; then ok "send-reminders.js fails cleanly without config"; else bad "send-reminders.js error path"; fi
 
 echo ""
 echo "smoke: $PASS passed, $FAIL failed"

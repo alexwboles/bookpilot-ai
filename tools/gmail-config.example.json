@@ -1,0 +1,1 @@
+{"_comment":"Copy to gmail-config.json (gitignored — NEVER commit the real one) and fill in your Google OAuth client values. See README.md for setup.","client_id":"PASTE_YOUR_CLIENT_ID.apps.googleusercontent.com","client_secret":"PASTE_YOUR_CLIENT_SECRET","refresh_token":null,"sender":"you@example.com"}

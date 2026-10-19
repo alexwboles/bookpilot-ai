@@ -111,8 +111,17 @@
     return null;
   }
 
+  // Blocked dates may be stored as plain 'YYYY-MM-DD' strings (older data)
+  // or {date, note} objects (current). Normalize to strings for every check
+  // so callers passing the raw state array still honor blocked days.
+  function blockedList(blockedDates) {
+    return (blockedDates || []).map(function (bd) {
+      return typeof bd === 'string' ? bd : (bd && bd.date);
+    });
+  }
+
   function isBlocked(dateStr, blockedDates) {
-    return (blockedDates || []).indexOf(dateStr) !== -1;
+    return blockedList(blockedDates).indexOf(dateStr) !== -1;
   }
 
   // All bookable start-times (minutes) for a service on a date.
@@ -156,6 +165,7 @@
     if (!(inp.start >= 0)) errs.push('Pick a time slot.');
     if (!inp.name || !String(inp.name).trim()) errs.push('Your name is required.');
     if (!inp.phone || !String(inp.phone).trim()) errs.push('A phone number is required so we can confirm.');
+    if (inp.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(inp.email).trim())) errs.push('That email address does not look valid.');
     return { errors: errs, service: svc };
   }
 
@@ -182,9 +192,14 @@
     for (var i = 0; i < state.bookings.length; i++) {
       var b = state.bookings[i];
       if (b.date !== inp.date || ACTIVE_STATUSES.indexOf(b.status) === -1) continue;
+      // A booking assigned to another team member does not block this one;
+      // unassigned bookings block everyone.
+      if (inp.staffId && b.staffId && b.staffId !== inp.staffId) continue;
       var win = bookingBlockWindow(state, b);
       if (overlaps(inp.start, end + bufNew, win.start, win.end)) return { ok: false, error: 'That slot was just taken — please pick another.' };
     }
+    var staffErr = validateStaffBooking(state, svc, inp.staffId);
+    if (staffErr) return { ok: false, error: staffErr };
     var id = uid('bk');
     var booking = {
       id: id,
@@ -198,7 +213,9 @@
       end: end,
       name: String(inp.name).trim(),
       phone: String(inp.phone).trim(),
+      email: inp.email ? String(inp.email).trim() : '',
       notes: inp.notes ? String(inp.notes).trim() : '',
+      staffId: inp.staffId || null,
       status: 'confirmed',
       reminded: false,
       createdAt: new Date().toISOString()
@@ -277,8 +294,9 @@
     return '<iframe src="' + src + '" width="100%" height="640" style="border:0;border-radius:0" title="Book online"></iframe>';
   }
 
-  function reminderMessage(bizName, b) {
-    return 'Hi ' + b.name + '! Reminder: you have ' + b.serviceName + ' at ' + bizName +
+  function reminderMessage(bizName, b, staffName) {
+    var who = staffName ? ' with ' + staffName : '';
+    return 'Hi ' + b.name + '! Reminder: you have ' + b.serviceName + who + ' at ' + bizName +
       ' on ' + fmtDate(b.date) + ' at ' + fmtTime(b.start) + '. Booking ref ' +
       (b.ref || bookingRef(b.id)) + '. Reply to confirm or reschedule. Thanks!';
   }
@@ -290,14 +308,15 @@
 
   // Full bookings export (owner). Sorted chronologically; CSV-safe escaping.
   function bookingsToCSV(state) {
-    var header = ['Ref', 'Date', 'Time', 'Customer', 'Phone', 'Service', 'Duration (min)', 'Price', 'Status', 'Notes'];
+    var header = ['Ref', 'Date', 'Time', 'Customer', 'Phone', 'Email', 'Service', 'Team member', 'Duration (min)', 'Price', 'Status', 'Notes'];
     var list = (state.bookings || []).slice().sort(function (a, b) {
       return (a.date + pad5(a.start)) < (b.date + pad5(b.start)) ? -1 : 1;
     });
     var rows = [header];
     list.forEach(function (b) {
-      rows.push([b.ref || bookingRef(b.id), b.date, fmtRange(b.start, b.end), b.name || '', b.phone || '',
-        b.serviceName || '', b.durationMin || '', b.price || 0, b.status || '', b.notes || '']);
+      var m = b.staffId ? getStaffMember(state, b.staffId) : null;
+      rows.push([b.ref || bookingRef(b.id), b.date, fmtRange(b.start, b.end), b.name || '', b.phone || '', b.email || '',
+        b.serviceName || '', m ? m.name : '', b.durationMin || '', b.price || 0, b.status || '', b.notes || '']);
     });
     return rows.map(function (r) { return r.map(csvEscape).join(','); }).join('\r\n');
   }
@@ -449,6 +468,257 @@
     return { bookings: hits.length, completed: completed, totalSpent: spent, lastVisit: last.slice(0, 10) };
   }
 
+  // ---------- multi-staff ----------
+  // Staff model is single-browser (front-desk / shared tablet): state.staff =
+  // [{id, name}]. Services optionally list staffIds who perform them (empty =
+  // anyone). Bookings carry staffId (null = unassigned). A booking assigned to
+  // one staff member does NOT block other staff members' slots; an unassigned
+  // booking blocks everyone (safe legacy behavior).
+
+  function staffList(state) {
+    return state.staff || [];
+  }
+
+  function getStaffMember(state, id) {
+    var list = staffList(state);
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+    return null;
+  }
+
+  function addStaffMember(state, name) {
+    var n = String(name == null ? '' : name).trim();
+    if (!n) return { ok: false, error: 'Enter a team member name.' };
+    if (n.length > 60) return { ok: false, error: 'Name is too long (60 characters max).' };
+    state.staff = staffList(state);
+    var dup = state.staff.some(function (m) { return m.name.toLowerCase() === n.toLowerCase(); });
+    if (dup) return { ok: false, error: 'That team member is already listed.' };
+    var member = { id: uid('st'), name: n };
+    state.staff.push(member);
+    return { ok: true, member: member };
+  }
+
+  // Removing a team member unassigns their bookings (staffId -> null) rather
+  // than deleting history. Returns the count of bookings unassigned.
+  function removeStaffMember(state, id) {
+    state.staff = staffList(state).filter(function (m) { return m.id !== id; });
+    var n = 0;
+    (state.bookings || []).forEach(function (b) {
+      if (b.staffId === id) { b.staffId = null; n++; }
+    });
+    (state.services || []).forEach(function (s) {
+      if (s.staffIds) s.staffIds = s.staffIds.filter(function (sid) { return sid !== id; });
+    });
+    return n;
+  }
+
+  function setServiceStaff(state, serviceId, staffIds) {
+    var svc = getService(state.services, serviceId);
+    if (!svc) return { ok: false, error: 'Service not found.' };
+    var ids = (staffIds || []).filter(function (id) { return getStaffMember(state, id); });
+    svc.staffIds = ids;
+    return { ok: true, service: svc };
+  }
+
+  // Staff members who can perform a service. [] when no staff exist at all.
+  function eligibleStaff(state, service) {
+    var list = staffList(state);
+    if (!list.length || !service) return [];
+    var ids = service.staffIds;
+    if (!ids || !ids.length) return list.slice();
+    return list.filter(function (m) { return ids.indexOf(m.id) !== -1; });
+  }
+
+  // Slot availability for one staff member. Unassigned bookings block every
+  // staff member; bookings assigned to someone else do not block this one.
+  // staffId null/undefined = legacy behavior (every active booking blocks).
+  function slotsForStaff(dateStr, service, staffId, state, opts) {
+    opts = opts || {};
+    if (!service || !dateStr) return [];
+    var list = staffList(state);
+    if (staffId) {
+      var member = getStaffMember(state, staffId);
+      if (!member) return [];
+      if (list.length && eligibleStaff(state, service).every(function (m) { return m.id !== staffId; })) return [];
+    }
+    var blockedDates = opts.blockedDates !== undefined ? opts.blockedDates : state.blockedDates;
+    var hours = opts.hours || state.hours;
+    var bookings = opts.bookings || state.bookings;
+    var scoped = (bookings || []).filter(function (b) {
+      if (!staffId) return true;
+      return !b.staffId || b.staffId === staffId;
+    });
+    return slotsFor(dateStr, service, hours, blockedDates, scoped,
+      { today: opts.today, nowMin: opts.nowMin, services: opts.services || state.services });
+  }
+
+  // Earliest bookable { staffId, start } for a service on a date, across the
+  // eligible staff ("first available"). staffId is null when no staff exist.
+  // Returns null when nothing is free.
+  function firstAvailable(state, service, dateStr, opts) {
+    opts = opts || {};
+    var cands = eligibleStaff(state, service);
+    if (!cands.length) {
+      var solo = slotsForStaff(dateStr, service, null, state, opts);
+      return solo.length ? { staffId: null, start: solo[0] } : null;
+    }
+    var best = null;
+    cands.forEach(function (m) {
+      var slots = slotsForStaff(dateStr, service, m.id, state, opts);
+      if (slots.length && (!best || slots[0] < best.start)) best = { staffId: m.id, start: slots[0] };
+    });
+    return best;
+  }
+
+  // One staff member's day: bookings sorted by start (pad-safe).
+  function staffDaySchedule(state, dateStr, staffId) {
+    return (state.bookings || []).filter(function (b) {
+      return b.date === dateStr && (!staffId || b.staffId === staffId || (!b.staffId && staffId === 'unassigned'));
+    }).sort(function (a, b) {
+      return (pad5(a.start) < pad5(b.start)) ? -1 : 1;
+    });
+  }
+
+  function validateStaffBooking(state, service, staffId) {
+    if (!staffId) return null; // "first available" / no preference
+    var member = getStaffMember(state, staffId);
+    if (!member) return 'Unknown team member — please pick again.';
+    var ok = eligibleStaff(state, service).some(function (m) { return m.id === staffId; });
+    if (!ok) return member.name + ' does not perform ' + service.name + '.';
+    return null;
+  }
+
+  // ---------- notifications (free channels) ----------
+  // Plain-text digest of due reminders for ntfy.sh / email bodies.
+  function ntfyReminderText(bizName, due, state) {
+    var lines = ['BookPilot — ' + due.length + ' booking(s) tomorrow need a reminder (' + (bizName || 'your business') + '):'];
+    due.forEach(function (b) {
+      var m = state && b.staffId ? getStaffMember(state, b.staffId) : null;
+      var who = m ? ' with ' + m.name : '';
+      lines.push('- ' + b.name + ' (' + b.phone + ') — ' + b.serviceName + ' at ' + fmtTime(b.start) + who + ' [ref ' + (b.ref || bookingRef(b.id)) + ']');
+    });
+    return lines.join('\n');
+  }
+
+  // ---------- multi-device sync (export / import / QR payload) ----------
+  var SYNC_APP = 'bookpilot-ai';
+  var SYNC_FORMAT = 1;
+
+  function exportStore(state) {
+    return JSON.stringify({ app: SYNC_APP, format: SYNC_FORMAT, exportedAt: new Date().toISOString(), state: state });
+  }
+
+  // Base64url helpers without atob/btoa (logic.js runs in Node too).
+  var B64U = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+  function b64uEncode(bytes) {
+    var out = '';
+    for (var i = 0; i < bytes.length; i += 3) {
+      var n = (bytes[i] << 16) | ((bytes[i + 1] || 0) << 8) | (bytes[i + 2] || 0);
+      out += B64U[(n >>> 18) & 63] + B64U[(n >>> 12) & 63] +
+        (i + 1 < bytes.length ? B64U[(n >>> 6) & 63] : '') +
+        (i + 2 < bytes.length ? B64U[n & 63] : '');
+    }
+    return out;
+  }
+  function b64uDecode(s) {
+    var clean = String(s || '').replace(/[^A-Za-z0-9\-_]/g, '');
+    var out = [];
+    for (var i = 0; i < clean.length; i += 4) {
+      var n = (B64U.indexOf(clean[i]) << 18) | (B64U.indexOf(clean[i + 1]) << 12) |
+        ((i + 2 < clean.length ? B64U.indexOf(clean[i + 2]) : 0) << 6) |
+        (i + 3 < clean.length ? B64U.indexOf(clean[i + 3]) : 0);
+      out.push((n >>> 16) & 255);
+      if (i + 2 < clean.length) out.push((n >>> 8) & 255);
+      if (i + 3 < clean.length) out.push(n & 255);
+    }
+    return out;
+  }
+  function utf8Bytes(str) {
+    var enc = encodeURIComponent(str);
+    var out = [];
+    for (var i = 0; i < enc.length; i++) {
+      if (enc[i] === '%') { out.push(parseInt(enc.substr(i + 1, 2), 16)); i += 2; }
+      else out.push(enc.charCodeAt(i));
+    }
+    return out;
+  }
+  function bytesToUtf8(bytes) {
+    var s = '';
+    for (var i = 0; i < bytes.length; i++) {
+      var b = bytes[i];
+      if (b < 128) s += String.fromCharCode(b);
+      else if (b >= 194 && b < 224 && i + 1 < bytes.length) { s += String.fromCharCode(((b & 31) << 6) | (bytes[i + 1] & 63)); i++; }
+      else if (b >= 224 && b < 240 && i + 2 < bytes.length) { s += String.fromCharCode(((b & 15) << 12) | ((bytes[i + 1] & 63) << 6) | (bytes[i + 2] & 63)); i += 2; }
+      else s += '\uFFFD';
+    }
+    return s;
+  }
+
+  // Encode the store for QR transfer. Returns { ok, payload, encoding, bytes }
+  // or { ok:false, error } when the store is too large for a QR code.
+  // encoding is 'BP1' (base64url JSON) — callers may gzip first and use 'BP1Z'.
+  function syncPayload(state, alreadyZipped) {
+    var json = exportStore(state);
+    var bytes = alreadyZipped || utf8Bytes(json);
+    var payload = (alreadyZipped ? 'BP1Z:' : 'BP1:') + b64uEncode(bytes);
+    if (payload.length > 2900) {
+      return { ok: false, error: 'Store is too large for a QR code (' + payload.length + ' chars). Use file export instead.' };
+    }
+    return { ok: true, payload: payload, encoding: alreadyZipped ? 'BP1Z' : 'BP1', bytes: payload.length };
+  }
+
+  function sanitizeState(s) {
+    s = s || {};
+    var staff = Array.isArray(s.staff) ? s.staff.filter(function (m) { return m && m.id && m.name; }) : [];
+    var staffIds = {};
+    staff.forEach(function (m) { staffIds[m.id] = true; });
+    return {
+      bizName: typeof s.bizName === 'string' ? s.bizName : '',
+      services: Array.isArray(s.services) ? s.services : [],
+      hours: (s.hours && typeof s.hours === 'object') ? s.hours : defaultHours(),
+      blockedDates: Array.isArray(s.blockedDates) ? s.blockedDates : [],
+      bookings: Array.isArray(s.bookings) ? s.bookings : [],
+      waitlist: Array.isArray(s.waitlist) ? s.waitlist : [],
+      staff: staff,
+      settings: (s.settings && typeof s.settings === 'object') ? s.settings : {}
+    };
+  }
+
+  // Accept: sync envelope JSON, raw state JSON, or a BP1:/BP1Z: transfer
+  // payload (BP1Z must be gunzipped by the caller first — see app.js).
+  // Returns { ok:true, state, meta } or { ok:false, error }.
+  function importStore(text) {
+    var raw = String(text == null ? '' : text).trim();
+    if (!raw) return { ok: false, error: 'Nothing to import — paste the transfer text or choose a file.' };
+    try {
+      var json = raw;
+      if (/^BP1Z:/.test(raw)) return { ok: false, error: 'This is a compressed transfer — it needs decompressing first (use the Import box, not a raw paste here).' };
+      if (/^BP1:/.test(raw)) json = bytesToUtf8(b64uDecode(raw.slice(4)));
+      var parsed = JSON.parse(json);
+      var s = parsed && parsed.app === SYNC_APP ? parsed.state : parsed;
+      if (!s || typeof s !== 'object' || !Array.isArray(s.bookings) || !Array.isArray(s.services)) {
+        return { ok: false, error: 'That does not look like a BookPilot backup.' };
+      }
+      var clean = sanitizeState(s);
+      // Drop staff references that no longer exist in the imported roster.
+      var okIds = {};
+      clean.staff.forEach(function (m) { okIds[m.id] = true; });
+      clean.services.forEach(function (svc) {
+        if (svc.staffIds) svc.staffIds = svc.staffIds.filter(function (id) { return okIds[id]; });
+      });
+      clean.bookings.forEach(function (b) { if (b.staffId && !okIds[b.staffId]) b.staffId = null; });
+      var meta = {
+        bookings: clean.bookings.length,
+        services: clean.services.length,
+        staff: clean.staff.length,
+        waitlist: clean.waitlist.length,
+        exportedAt: (parsed && parsed.exportedAt) || null
+      };
+      return { ok: true, state: clean, meta: meta };
+    } catch (e) {
+      return { ok: false, error: 'Could not read that backup (' + (e && e.message ? e.message : 'invalid data') + ').' };
+    }
+  }
+
   return {
     STATUSES: STATUSES,
     DEFAULT_SERVICES: DEFAULT_SERVICES,
@@ -488,6 +758,27 @@
     waitlistEntry: waitlistEntry,
     dayUtilization: dayUtilization,
     weekUtilization: weekUtilization,
-    customerStats: customerStats
+    customerStats: customerStats,
+    blockedList: blockedList,
+    // multi-staff
+    staffList: staffList,
+    getStaffMember: getStaffMember,
+    addStaffMember: addStaffMember,
+    removeStaffMember: removeStaffMember,
+    setServiceStaff: setServiceStaff,
+    eligibleStaff: eligibleStaff,
+    slotsForStaff: slotsForStaff,
+    firstAvailable: firstAvailable,
+    staffDaySchedule: staffDaySchedule,
+    // notifications (free channels)
+    ntfyReminderText: ntfyReminderText,
+    // multi-device sync
+    exportStore: exportStore,
+    importStore: importStore,
+    syncPayload: syncPayload,
+    b64uEncode: b64uEncode,
+    b64uDecode: b64uDecode,
+    utf8Bytes: utf8Bytes,
+    bytesToUtf8: bytesToUtf8
   };
 });

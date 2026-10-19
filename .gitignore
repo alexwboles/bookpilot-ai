@@ -1,0 +1,2 @@
+# Gmail OAuth credentials for tools/send-reminders.js — NEVER commit.
+tools/gmail-config.json
