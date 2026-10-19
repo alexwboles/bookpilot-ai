@@ -182,6 +182,16 @@ button.primary:hover { background: var(--green-deep); }
 .svc-name { font-weight: 800; font-size: 14px; }
 .svc-meta { font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
 
+/* booking step rail */
+.book-steps { list-style: none; display: flex; margin: 0 0 18px; padding: 0; border: 1px solid var(--line); background: var(--paper-2); }
+.book-steps .step { flex: 1; display: flex; align-items: center; gap: 9px; padding: 10px 14px; font-size: 13px; font-weight: 700; letter-spacing: .3px; color: var(--muted); border-left: 1px solid var(--line); }
+.book-steps .step:first-child { border-left: 0; }
+.book-steps .step-n { width: 22px; height: 22px; flex: none; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; border: 1px solid var(--line); background: #fff; color: var(--muted); }
+.book-steps .step.active { color: var(--green-ink); background: #fff; box-shadow: inset 0 -3px 0 var(--gold); }
+.book-steps .step.active .step-n { background: var(--green); border-color: var(--green); color: #fff; }
+.book-steps .step.done { color: var(--green); }
+.book-steps .step.done .step-n { background: var(--green-soft); border-color: var(--green-line); color: var(--green); }
+
 /* month calendar */
 .cal-head { display: flex; align-items: center; justify-content: space-between; margin: 20px 0 10px; }
 .cal-title { font-family: var(--serif); font-size: 19px; font-weight: 700; }

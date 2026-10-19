@@ -34,7 +34,7 @@
     return defaultState();
   }
 
-  function save() { localStorage.setItem(LS_KEY, JSON.stringify(state)); }
+  function save() { try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) { /* storage blocked/full: non-fatal */ } }
 
   var state = load();
   var selSlot = null;
@@ -673,7 +673,7 @@
 
   $('resetDemo').addEventListener('click', function () {
     if (!confirm('Load demo services, hours, and sample bookings? This replaces current data.')) return;
-    localStorage.removeItem(LS_KEY);
+    try { localStorage.removeItem(LS_KEY); } catch (e) { /* storage blocked: non-fatal */ }
     state = load();
     var t = B.todayStr();
     var d2 = B.addDays(t, 2);
@@ -685,7 +685,7 @@
 
   $('wipeAll').addEventListener('click', function () {
     if (!confirm('Erase ALL BookPilot data in this browser?')) return;
-    localStorage.removeItem(LS_KEY);
+    try { localStorage.removeItem(LS_KEY); } catch (e) { /* storage blocked: non-fatal */ }
     state = defaultState();
     save(); boot();
   });

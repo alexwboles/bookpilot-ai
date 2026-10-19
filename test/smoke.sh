@@ -218,6 +218,22 @@ for (const s of ['.cap-bar', '.ret-badge', '.returning']) {
 console.log('new sweep wiring ok');
 EOF
 [ $? -eq 0 ] && ok "capacity strip + returning customer + waitlist book wired" || bad "new sweep wiring"
+# 23: booking step rail — markup, 3 steps, styles present
+node << 'EOF'
+const fs = require('fs');
+const h = fs.readFileSync('/home/hatch/workspace/bookpilot-ai/index.html', 'utf8');
+const a = fs.readFileSync('/home/hatch/workspace/bookpilot-ai/js/app.js', 'utf8');
+const c = fs.readFileSync('/home/hatch/workspace/bookpilot-ai/css/style.css', 'utf8');
+if (!h.includes('id="bookSteps"')) { console.log('missing #bookSteps'); process.exit(1); }
+for (const n of ['1', '2', '3']) {
+  if (!h.includes('data-step="' + n + '"')) { console.log('missing step ' + n); process.exit(1); }
+}
+for (const s of ["setStep(1)", "setStep(2)", "setStep(3)", ".book-steps"]) {
+  if (!(a.includes(s) || c.includes(s))) { console.log('missing ' + s); process.exit(1); }
+}
+console.log('step rail wiring ok');
+EOF
+[ $? -eq 0 ] && ok "booking step rail (#bookSteps, 3 steps, styles) wired" || bad "step rail wiring"
 
 echo ""
 echo "smoke: $PASS passed, $FAIL failed"
