@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# BookPilot AI smoke tests — 16 top-level checks (incl. new-feature node checks + DOM ids). Fails fast on first failure.
+# BookPilot AI smoke tests — files, syntax, logic, DOM ids, design rules. Fails fast on first failure.
 set -u
 cd "$(dirname "$0")/.."
 PASS=0; FAIL=0
@@ -373,6 +373,137 @@ if [ -f tools/gmail-config.json ]; then bad "tools/gmail-config.json exists in r
 if grep -q "tools/gmail-config.json" .gitignore; then ok ".gitignore covers tools/gmail-config.json"; else bad ".gitignore missing gmail-config.json"; fi
 # tool refuses to run without config, cleanly
 if node tools/send-reminders.js --store /tmp/does-not-exist.json 2>&1 | grep -q "no config found"; then ok "send-reminders.js fails cleanly without config"; else bad "send-reminders.js error path"; fi
+
+# 30: v2 DOM ids (HUD, ticket rail, team hours, reschedule)
+for id in hud hudDate hudToday hudNext apptTicket shStaff shCopyBiz shSave shGrid shNote; do
+  if grep -q "id=\"$id\"" index.html; then ok "index.html has #$id"; else bad "index.html missing #$id"; fi
+done
+# consolidated day+time layout present
+if grep -q "book-cols" index.html; then ok "index.html has .book-cols layout"; else bad "index.html missing .book-cols"; fi
+
+# 31: redesign v2 wiring — ticket rail, HUD, reschedule, staff hours, timeline
+node << 'EOF'
+const fs = require('fs');
+const h = fs.readFileSync('/home/hatch/workspace/bookpilot-ai/index.html', 'utf8');
+const a = fs.readFileSync('/home/hatch/workspace/bookpilot-ai/js/app.js', 'utf8');
+const c = fs.readFileSync('/home/hatch/workspace/bookpilot-ai/css/style.css', 'utf8');
+for (const id of ['hudDate', 'hudToday', 'hudNext', 'apptTicket', 'shStaff', 'shSave', 'shGrid']) {
+  if (!h.includes('id="' + id + '"')) { console.log('missing ' + id); process.exit(1); }
+}
+for (const s of ['updateTicket', 'renderHud', 'renderReschedulePanel', 'reschedSlots',
+                'B.rescheduleBooking(', 'B.bookingToICS(', 'B.setStaffHours(', 'B.staffHours(',
+                'renderShGrid', 'tl-block', 'data-selfresched', 'data-move', 'data-ics']) {
+  if (!a.includes(s)) { console.log('app missing ' + s); process.exit(1); }
+}
+for (const s of ['.book-cols', '.appt-ticket', '.ticket', '.ticket-perf', '.ticket-actions',
+                '.tl-block', '.tl-colhead', '.resched', '.hud', '.tk-row']) {
+  if (!c.includes(s)) { console.log('css missing ' + s); process.exit(1); }
+}
+console.log('v2 wiring ok');
+EOF
+[ $? -eq 0 ] && ok "redesign v2: ticket rail, HUD, reschedule, staff hours, timeline wired" || bad "v2 wiring"
+
+# 32: design rules — zero rounded edges, no color gradients
+node << 'EOF'
+const fs = require('fs');
+const c = fs.readFileSync('/home/hatch/workspace/bookpilot-ai/css/style.css', 'utf8');
+if (/border-radius/.test(c)) { console.log('rounded edges found'); process.exit(1); }
+// the only gradient allowed is the gray "closed day" hatch in the capacity strip
+const grads = c.match(/[a-z-]*linear-gradient\(/g) || [];
+const bad = grads.filter(g => g !== 'repeating-linear-gradient(');
+if (bad.length) { console.log('color gradients found: ' + bad.join(',')); process.exit(1); }
+console.log('design rules ok (' + grads.length + ' hatch-only gradient)');
+EOF
+[ $? -eq 0 ] && ok "design rules: no rounded edges, no color gradients" || bad "design rules"
+
+# 33: reschedule logic — move, conflict, blocked/closed/past, non-confirmed, reminded reset
+# (dates are future relative to real today; rescheduleBooking guards past dates)
+node << 'EOF'
+const B = require('/home/hatch/workspace/bookpilot-ai/js/logic.js');
+const svc = { id: 's1', name: 'Cut', durationMin: 30, price: 35 };
+const st = { services: [svc], hours: B.defaultHours(), blockedDates: [], bookings: [], staff: [] };
+B.bookSlot(st, { serviceId: 's1', date: '2026-10-20', start: 540, name: 'A', phone: '1' });
+const id = st.bookings[0].id;
+B.markReminded(st, id);
+let r = B.rescheduleBooking(st, id, '2026-10-21', 600);
+if (!r.ok || r.booking.date !== '2026-10-21' || r.booking.start !== 600 || r.booking.end !== 630) { console.log('move failed: ' + JSON.stringify(r).slice(0,100)); process.exit(1); }
+if (r.booking.reminded !== false) { console.log('reminded not reset'); process.exit(1); }
+// old slot freed, new slot consumed
+const oldSlots = B.slotsFor('2026-10-20', svc, st.hours, [], st.bookings, { today: '2026-10-19', nowMin: 0 });
+const newSlots = B.slotsFor('2026-10-21', svc, st.hours, [], st.bookings, { today: '2026-10-19', nowMin: 0 });
+if (oldSlots.indexOf(540) === -1 || newSlots.indexOf(600) !== -1) { console.log('slot freed/consumed wrong'); process.exit(1); }
+B.bookSlot(st, { serviceId: 's1', date: '2026-10-22', start: 660, name: 'B', phone: '2' });
+r = B.rescheduleBooking(st, id, '2026-10-22', 660);
+if (r.ok || !/taken/.test(r.error)) { console.log('conflict not rejected'); process.exit(1); }
+r = B.rescheduleBooking(st, id, '2026-10-25', 600); // Sunday: closed
+if (r.ok || !/Closed/.test(r.error)) { console.log('closed day not rejected'); process.exit(1); }
+st.blockedDates.push('2026-10-23');
+r = B.rescheduleBooking(st, id, '2026-10-23', 600);
+if (r.ok || !/blocked/.test(r.error)) { console.log('blocked not rejected'); process.exit(1); }
+r = B.rescheduleBooking(st, id, '2020-01-06', 600);
+if (r.ok || !/future/.test(r.error)) { console.log('past date not rejected'); process.exit(1); }
+B.setStatus(st, id, 'cancelled');
+r = B.rescheduleBooking(st, id, '2026-10-27', 600);
+if (r.ok || !/Only upcoming/.test(r.error)) { console.log('cancelled move not rejected'); process.exit(1); }
+r = B.rescheduleBooking(st, 'nope', '2026-10-27', 600);
+if (r.ok || !/not found/.test(r.error)) { console.log('missing id not rejected'); process.exit(1); }
+console.log('reschedule lifecycle ok');
+EOF
+[ $? -eq 0 ] && ok "rescheduleBooking: move, conflict, blocked/closed/past, status guards" || bad "rescheduleBooking"
+
+# 34: ICS export — calendar fields, times, escaping
+node << 'EOF'
+const B = require('/home/hatch/workspace/bookpilot-ai/js/logic.js');
+const b = { id: 'bk-1', ref: 'B-7X2Q', serviceName: 'Cut, Deluxe', date: '2026-10-05', start: 540, end: 570, name: 'Jane', notes: 'arrive; early' };
+const ics = B.bookingToICS(b, 'Main St Salon', 'Maya');
+const need = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'BEGIN:VEVENT', 'END:VEVENT', 'END:VCALENDAR',
+  'UID:bk-1@bookpilot-ai', 'DTSTART:20261005T090000', 'DTEND:20261005T093000',
+  'SUMMARY:Cut\\, Deluxe with Maya', 'LOCATION:Main St Salon', 'STATUS:CONFIRMED',
+  'DESCRIPTION:Booking ref B-7X2Q\\nNotes: arrive\\; early', 'DTSTAMP:'];
+for (const s of need) { if (!ics.includes(s)) { console.log('ics missing: ' + s); process.exit(1); } }
+console.log('ics ok');
+EOF
+[ $? -eq 0 ] && ok "bookingToICS: VEVENT fields, local times, escaping" || bad "bookingToICS"
+
+# 35: per-staff hours — validation, set/clear, slot engine honors, import sanitizes
+node << 'EOF'
+const B = require('/home/hatch/workspace/bookpilot-ai/js/logic.js');
+const svc = { id: 's1', name: 'Cut', durationMin: 30, price: 35 };
+const st = { services: [svc], hours: B.defaultHours(), blockedDates: [], bookings: [], staff: [] };
+const m = B.addStaffMember(st, 'Maya').member;
+if (!B.validStaffHours(null) || !B.validStaffHours(undefined)) { console.log('null hours invalid'); process.exit(1); }
+if (B.validStaffHours({ 1: [900, 600] })) { console.log('bad range accepted'); process.exit(1); }
+if (B.validStaffHours('nope')) { console.log('non-object accepted'); process.exit(1); }
+// unset = business hours
+if (B.staffHours(st, m.id) !== st.hours) { console.log('fallback wrong'); process.exit(1); }
+let r = B.setStaffHours(st, m.id, { 0: null, 1: [600, 840], 2: [600, 840], 3: [600, 840], 4: [600, 840], 5: [600, 840], 6: null });
+if (!r.ok) { console.log('set failed'); process.exit(1); }
+const base = { today: '2026-10-19', nowMin: 0, services: [svc] };
+const ms = B.slotsForStaff('2026-10-20', svc, m.id, st, base); // Tuesday
+if (ms.length !== 8 || ms[0] !== 600) { console.log('staff slots wrong: ' + ms.length); process.exit(1); }
+const sat = B.slotsForStaff('2026-10-24', svc, m.id, st, base); // Saturday: staff closed
+if (sat.length !== 0) { console.log('staff saturday should be closed'); process.exit(1); }
+// first-available still matches through the restricted hours
+const fa = B.firstAvailable(st, svc, '2026-10-20', base);
+if (!fa || fa.staffId !== m.id || fa.start !== 600) { console.log('firstAvailable wrong: ' + JSON.stringify(fa)); process.exit(1); }
+// reschedule honors staff hours: 9:00 is outside Maya's hours
+B.bookSlot(st, { serviceId: 's1', date: '2026-10-20', start: 600, name: 'A', phone: '1', staffId: m.id });
+const id = st.bookings[0].id;
+r = B.rescheduleBooking(st, id, '2026-10-20', 540);
+if (r.ok || !/Outside working hours/.test(r.error)) { console.log('staff-hours reschedule guard failed'); process.exit(1); }
+// clear back to business hours
+r = B.setStaffHours(st, m.id, null);
+if (!r.ok || m.hours !== undefined || B.staffHours(st, m.id) !== st.hours) { console.log('clear failed'); process.exit(1); }
+// import sanitizes garbage hours, keeps good ones
+const imp = B.importStore(JSON.stringify({ app: 'bookpilot-ai', format: 1, state: {
+  services: [svc], bookings: [], staff: [{ id: 'a', name: 'Ok', hours: { 1: [540, 1020] } }, { id: 'b', name: 'Bad', hours: { 1: [1020, 540] } }, { id: 'c', name: 'Legacy' }]
+}}));
+if (!imp.ok || imp.state.staff[0].hours[1][0] !== 540 || imp.state.staff[1].hours || imp.state.staff[2].hours) {
+  console.log('sanitize wrong: ' + JSON.stringify(imp.state.staff)); process.exit(1);
+}
+console.log('staff hours ok');
+EOF
+[ $? -eq 0 ] && ok "per-staff hours: validation, engine, reschedule guard, import sanitize" || bad "per-staff hours"
 
 echo ""
 echo "smoke: $PASS passed, $FAIL failed"

@@ -371,6 +371,81 @@
     return { ok: false, error: 'Booking not found.' };
   }
 
+  // Move a confirmed booking to a new date/start. The booking's service,
+  // staff assignment, and customer stay the same; the new slot is validated
+  // exactly like a fresh booking (blocked/closed/hours/conflict, honoring
+  // the assigned staff member's own working hours). The booking itself is
+  // ignored in the conflict check. Reminded resets — the new date needs a
+  // fresh day-before reminder.
+  function rescheduleBooking(state, bookingId, newDate, newStart) {
+    var b = null;
+    for (var i = 0; i < state.bookings.length; i++) {
+      if (state.bookings[i].id === bookingId) { b = state.bookings[i]; break; }
+    }
+    if (!b) return { ok: false, error: 'Booking not found.' };
+    if (b.status !== 'confirmed') return { ok: false, error: 'Only upcoming confirmed bookings can be rescheduled.' };
+    if (!newDate || !/^\d{4}-\d{2}-\d{2}$/.test(newDate)) return { ok: false, error: 'Pick a valid date.' };
+    if (newDate < todayStr()) return { ok: false, error: 'Pick a future date.' };
+    if (!(newStart >= 0)) return { ok: false, error: 'Pick a time slot.' };
+    var svc = getService(state.services, b.serviceId);
+    if (!svc) return { ok: false, error: 'That service no longer exists.' };
+    if (isBlocked(newDate, state.blockedDates)) return { ok: false, error: 'That date is blocked — please pick another.' };
+    var dayHours = (staffHours(state, b.staffId) || {})[weekdayOf(newDate)];
+    if (!dayHours) return { ok: false, error: 'Closed that day — please pick another.' };
+    var end = newStart + svc.durationMin;
+    if (newStart < dayHours[0] || end > dayHours[1]) return { ok: false, error: 'Outside working hours.' };
+    var bufNew = bufferOf(svc);
+    for (var j = 0; j < state.bookings.length; j++) {
+      var o = state.bookings[j];
+      if (o.id === bookingId || o.date !== newDate || ACTIVE_STATUSES.indexOf(o.status) === -1) continue;
+      if (b.staffId && o.staffId && o.staffId !== b.staffId) continue;
+      var win = bookingBlockWindow(state, o);
+      if (overlaps(newStart, end + bufNew, win.start, win.end)) {
+        return { ok: false, error: 'That slot is taken — please pick another.' };
+      }
+    }
+    var staffErr = validateStaffBooking(state, svc, b.staffId);
+    if (staffErr) return { ok: false, error: staffErr };
+    b.date = newDate;
+    b.start = newStart;
+    b.end = end;
+    b.reminded = false;
+    return { ok: true, booking: b };
+  }
+
+  function icsEsc(s) {
+    return String(s == null ? '' : s)
+      .replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+  }
+
+  // RFC 5545 VEVENT for a booking — floating local times (no TZ guessing).
+  // Lets customers add the appointment to any calendar app with one click.
+  function bookingToICS(b, bizName, staffNm) {
+    function stamp(dateStr, mins) {
+      var d = dateStr.replace(/-/g, '');
+      return d + 'T' + pad(Math.floor(mins / 60)) + pad(mins % 60) + '00';
+    }
+    var who = staffNm ? ' with ' + staffNm : '';
+    var dtstamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '') + 'Z';
+    var lines = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//BookPilot AI//Booking//EN',
+      'BEGIN:VEVENT',
+      'UID:' + icsEsc(b.id || b.ref || 'bookpilot') + '@bookpilot-ai',
+      'DTSTAMP:' + dtstamp,
+      'DTSTART:' + stamp(b.date, b.start),
+      'DTEND:' + stamp(b.date, b.end),
+      'SUMMARY:' + icsEsc(b.serviceName + who + ' — ' + (bizName || 'Booking')),
+      'DESCRIPTION:' + icsEsc('Booking ref ' + (b.ref || bookingRef(b.id)) + (b.notes ? '\nNotes: ' + b.notes : '')),
+      'LOCATION:' + icsEsc(bizName || ''),
+      'STATUS:CONFIRMED',
+      'END:VEVENT',
+      'END:VCALENDAR'
+    ];
+    return lines.join('\r\n') + '\r\n';
+  }
+
   // Waitlist: customers join when a day is fully booked. The owner sees who
   // is waiting per service+date and can reach out when a slot frees up.
   // inp: { serviceId, date, name, phone }.
@@ -485,6 +560,44 @@
     return null;
   }
 
+  // Per-team-member working hours. A member's `hours` is either null/absent
+  // ("same as business hours") or a full 0-6 map like state.hours (null =
+  // closed that day). staffHours() returns the effective map; slotsForStaff()
+  // honors it automatically, including "first available" matching.
+  function validStaffHours(hours) {
+    if (hours == null) return true; // absent = business hours
+    if (typeof hours !== 'object') return false;
+    for (var d = 0; d < 7; d++) {
+      var r = hours[d];
+      if (r == null) continue;
+      var from = parseInt(r[0], 10), to = parseInt(r[1], 10);
+      if (isNaN(from) || isNaN(to) || from < 0 || to > 1440 || to <= from) return false;
+    }
+    return true;
+  }
+
+  function staffHours(state, staffId) {
+    var m = staffId ? getStaffMember(state, staffId) : null;
+    if (m && m.hours && typeof m.hours === 'object' && validStaffHours(m.hours)) return m.hours;
+    return state.hours;
+  }
+
+  // hours: null = back to business hours; otherwise a 0-6 map (null per day =
+  // closed). Returns { ok } or { ok:false, error }.
+  function setStaffHours(state, staffId, hours) {
+    var m = getStaffMember(state, staffId);
+    if (!m) return { ok: false, error: 'Team member not found.' };
+    if (hours == null) { delete m.hours; return { ok: true }; }
+    if (!validStaffHours(hours)) return { ok: false, error: 'Closing time must be after opening time on every open day.' };
+    var clean = {};
+    for (var d = 0; d < 7; d++) {
+      var r = hours[d];
+      clean[d] = (r == null) ? null : [parseInt(r[0], 10), parseInt(r[1], 10)];
+    }
+    m.hours = clean;
+    return { ok: true };
+  }
+
   function addStaffMember(state, name) {
     var n = String(name == null ? '' : name).trim();
     if (!n) return { ok: false, error: 'Enter a team member name.' };
@@ -541,7 +654,7 @@
       if (list.length && eligibleStaff(state, service).every(function (m) { return m.id !== staffId; })) return [];
     }
     var blockedDates = opts.blockedDates !== undefined ? opts.blockedDates : state.blockedDates;
-    var hours = opts.hours || state.hours;
+    var hours = opts.hours || staffHours(state, staffId);
     var bookings = opts.bookings || state.bookings;
     var scoped = (bookings || []).filter(function (b) {
       if (!staffId) return true;
@@ -668,7 +781,22 @@
 
   function sanitizeState(s) {
     s = s || {};
+    // Staff records: id + name required; optional per-day hours map is kept
+    // only when every day is valid (null = closed, [from,to] minutes).
+    // Legacy records (no hours) load fine — they get business hours.
     var staff = Array.isArray(s.staff) ? s.staff.filter(function (m) { return m && m.id && m.name; }) : [];
+    staff = staff.map(function (m) {
+      var mm = { id: m.id, name: m.name };
+      if (m.hours && typeof m.hours === 'object' && validStaffHours(m.hours)) {
+        var clean = {};
+        for (var d = 0; d < 7; d++) {
+          var r = m.hours[d];
+          clean[d] = (r == null) ? null : [parseInt(r[0], 10), parseInt(r[1], 10)];
+        }
+        mm.hours = clean;
+      }
+      return mm;
+    });
     var staffIds = {};
     staff.forEach(function (m) { staffIds[m.id] = true; });
     return {
@@ -750,6 +878,11 @@
     revenueByService: revenueByService,
     findBookingsByPhone: findBookingsByPhone,
     cancelBooking: cancelBooking,
+    rescheduleBooking: rescheduleBooking,
+    bookingToICS: bookingToICS,
+    validStaffHours: validStaffHours,
+    staffHours: staffHours,
+    setStaffHours: setStaffHours,
     bufferOf: bufferOf,
     bookingRef: bookingRef,
     addToWaitlist: addToWaitlist,

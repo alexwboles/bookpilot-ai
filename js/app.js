@@ -31,6 +31,10 @@
         s.bookings = s.bookings || [];
         s.waitlist = s.waitlist || [];
         s.staff = s.staff || [];
+        // Drop invalid per-staff hours from old stores (keeps business hours).
+        s.staff.forEach(function (m) {
+          if (m && m.hours && !B.validStaffHours(m.hours)) delete m.hours;
+        });
         s.settings = s.settings || {};
         return s;
       }
@@ -83,6 +87,44 @@
       li.classList.toggle('active', s === n);
       li.classList.toggle('done', s < n);
     });
+  }
+
+  // Live "appointment ticket" in the booking info rail — fills in as the
+  // customer picks service, day, time, and team member (Calendly-style).
+  function updateTicket() {
+    var host = $('apptTicket');
+    if (!host) return;
+    var svc = B.getService(state.services, $('bkService').value);
+    var date = $('bkDate').value;
+    var team = selStaff ? staffName(selStaff) :
+      (B.staffList(state).length ? 'First available' : '');
+    function row(k, v) {
+      return '<div class="tk-row"><span class="tk-k">' + k + '</span><span class="tk-v' +
+        (v ? '' : ' empty') + '">' + (v ? esc(v) : '—') + '</span></div>';
+    }
+    var svcVal = svc ? svc.name + ' · ' + svc.durationMin + ' min · $' + svc.price : '';
+    var dateVal = date ? B.fmtDate(date) : '';
+    var timeVal = (selSlot != null && date) ? B.fmtTime(selSlot) + ' – ' + B.fmtTime(selSlot + (svc ? svc.durationMin : 0)) : '';
+    host.innerHTML = '<div class="tk-head">Your appointment</div>' +
+      row('Service', svcVal) + row('Date', dateVal) + row('Time', timeVal) + row('Team', team);
+  }
+
+  // Sidebar "today at a glance" HUD.
+  function renderHud() {
+    var d = $('hudDate'), t = $('hudToday'), n = $('hudNext');
+    if (!d) return;
+    var today = B.todayStr();
+    d.textContent = B.fmtDate(today);
+    var todays = state.bookings.filter(function (b) { return b.date === today && b.status === 'confirmed'; });
+    t.textContent = todays.length ? todays.length + ' appointment' + (todays.length === 1 ? '' : 's') + ' today' : 'Nothing booked today';
+    var up = B.upcomingBookings(state, today);
+    if (up.length) {
+      var b = up[0];
+      var who = b.staffId ? ' with ' + staffName(b.staffId) : '';
+      n.textContent = 'Next: ' + b.name + ' — ' + b.serviceName + who + ', ' + B.fmtDate(b.date) + ' ' + B.fmtTime(b.start);
+    } else {
+      n.textContent = 'No upcoming bookings.';
+    }
   }
 
   // ---------- team (multi-staff) ----------
@@ -209,9 +251,9 @@
         box.innerHTML = '<div class="d">' + DAYS[day] + '</div>' +
           '<label style="display:flex;gap:6px;align-items:center;font-size:13px;text-transform:none;letter-spacing:0">' +
           '<input type="checkbox" data-h-open="' + day + '"' + (h ? ' checked' : '') + '> Open</label>' +
-          '<div style="display:flex;gap:6px;margin-top:6px">' +
-          '<input type="time" data-h-from="' + day + '" value="' + (h ? to24(h[0]) : '09:00') + '">' +
-          '<input type="time" data-h-to="' + day + '" value="' + (h ? to24(h[1]) : '17:00') + '">' +
+          '<div class="daybox-times">' +
+          '<input type="time" data-h-from="' + day + '" value="' + (h ? to24(h[0]) : '09:00') + '" aria-label="Opens">' +
+          '<input type="time" data-h-to="' + day + '" value="' + (h ? to24(h[1]) : '17:00') + '" aria-label="Closes">' +
           '</div>';
         g.appendChild(box);
       })(d);
@@ -225,6 +267,11 @@
   function toMin(t) {
     var p = t.split(':');
     return parseInt(p[0], 10) * 60 + parseInt(p[1], 10);
+  }
+
+  function to24(min) {
+    var h = Math.floor(min / 60), m = min % 60;
+    return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
   }
 
   $('hoursSave').addEventListener('click', function () {
@@ -352,13 +399,13 @@
     renderStaffSelect();
     if (!svc) {
       wrap.innerHTML = '<p class="muted">Add a service first (Services tab).</p>';
-      renderSvcSummary(null); renderCalendar(); setStep(1); return;
+      renderSvcSummary(null); renderCalendar(); setStep(1); updateTicket(); return;
     }
     if (!date) {
       wrap.innerHTML = '<p class="muted">Pick a highlighted day to see available times.</p>';
-      renderSvcSummary(svc); renderCalendar(); setStep(1); return;
+      renderSvcSummary(svc); renderCalendar(); setStep(1); updateTicket(); return;
     }
-    if (B.isBlocked(date, blockedDateList())) { wrap.innerHTML = '<div class="warnbox">That date is blocked — please pick another day.</div>'; renderCalendar(); setStep(2); return; }
+    if (B.isBlocked(date, blockedDateList())) { wrap.innerHTML = '<div class="warnbox">That date is blocked — please pick another day.</div>'; renderCalendar(); setStep(2); updateTicket(); return; }
     var slots = staffSlots(date, svc, selStaff);
     if (!slots.length) {
       wrap.innerHTML = '<div class="warnbox">No availability on ' + esc(B.fmtDate(date)) + ' — try another day, or join the waitlist below.</div>' +
@@ -379,6 +426,7 @@
         $('wlResult').innerHTML = '<div class="notice"><strong>You\'re on the waitlist</strong> for ' +
           esc(svc.name) + ' on ' + esc(B.fmtDate(date)) + '. We\'ll call ' + esc(r.entry.phone) + ' if a spot opens.</div>';
       });
+      updateTicket();
       return;
     }
     var groups = {};
@@ -408,8 +456,10 @@
         $('bkResult').innerHTML = '';
         renderReturning();
         setStep(3);
+        updateTicket();
       });
     });
+    updateTicket();
   }
 
   // ---------- repeat-customer recognition ----------
@@ -459,10 +509,33 @@
     save();
     var b = r.booking;
     var withWhom = b.staffId ? ' with ' + esc(staffName(b.staffId)) : '';
-    $('bkResult').innerHTML = '<div class="notice"><strong>Booked!</strong> ' + esc(b.serviceName) + withWhom +
-      ' on ' + esc(B.fmtDate(b.date)) + ' at ' + esc(B.fmtTime(b.start)) +
-      '. We\'ll see you then, ' + esc(b.name.split(' ')[0]) + '.' +
-      '<br><span class="muted">Your booking ref: <strong>' + esc(b.ref || B.bookingRef(b.id)) + '</strong> — keep it handy.</span></div>';
+    $('bkResult').innerHTML =
+      '<div class="ticket">' +
+      '<div class="ticket-top">' +
+      '<p class="kicker">Booking confirmed</p>' +
+      '<h3>' + esc(b.serviceName) + withWhom + '</h3>' +
+      '<p class="ticket-when">' + esc(B.fmtDate(b.date)) + ' · ' + esc(B.fmtRange(b.start, b.end)) + '</p>' +
+      '<p class="ticket-ref">Booking ref <strong>' + esc(b.ref || B.bookingRef(b.id)) + '</strong></p>' +
+      '<p class="muted small" style="margin:8px 0 0">We\'ll see you then, ' + esc(b.name.split(' ')[0]) +
+      '. You\'ll get a reminder the day before.</p>' +
+      '</div>' +
+      '<div class="ticket-perf" aria-hidden="true"></div>' +
+      '<div class="ticket-actions">' +
+      '<button class="btn primary small" data-ics="' + esc(b.id) + '">Add to calendar (.ics)</button>' +
+      '<button class="btn ghost small" id="bkAgain">Book another</button>' +
+      '</div></div>';
+    $('bkResult').querySelector('[data-ics]').addEventListener('click', function () {
+      var bk = findBooking(b.id);
+      if (!bk) return;
+      downloadFile('bookpilot-booking-' + (bk.ref || B.bookingRef(bk.id)) + '.ics',
+        B.bookingToICS(bk, state.bizName, staffName(bk.staffId)), 'text/calendar');
+    });
+    $('bkAgain').addEventListener('click', function () {
+      $('bkResult').innerHTML = '';
+      selSlot = null;
+      window.scrollTo(0, 0);
+      renderBookingForm();
+    });
     $('bkForm').style.display = 'none';
     $('bkName').value = ''; $('bkPhone').value = ''; $('bkEmail').value = ''; $('bkNotes').value = '';
     renderReturning();
@@ -508,6 +581,19 @@
 
     if (!list.length) { $('bookingsTable').innerHTML = '<p class="muted">No bookings here yet.</p>'; }
     else {
+      $('bookingsTable').innerHTML = '';
+      if (moveBookingId) {
+        var mb = findBooking(moveBookingId);
+        if (mb) {
+          var panel = document.createElement('div');
+          $('bookingsTable').appendChild(panel);
+          renderReschedulePanel(panel, mb, function () {
+            moveBookingId = null;
+            renderBookings(); renderStats(); renderSvcRevenue(); renderBookingForm(); renderSchedule();
+          });
+          panel.scrollIntoView({ block: 'nearest' });
+        } else { moveBookingId = null; }
+      }
       var html = '<table><tr><th>When</th><th>Customer</th><th>Service</th><th>Ref</th><th>Status</th><th>Actions</th></tr>';
       list.forEach(function (b) {
         var cs = B.customerStats(state, b.phone);
@@ -521,10 +607,14 @@
           '<td><span class="pill ' + b.status + '">' + b.status + '</span></td><td>' +
           '<button class="ghost small" data-act="completed" data-id="' + b.id + '">Complete</button> ' +
           '<button class="ghost small" data-act="no-show" data-id="' + b.id + '">No-show</button> ' +
+          '<button class="ghost small" data-move="' + b.id + '">Move</button> ' +
           '<button class="danger small" data-act="cancelled" data-id="' + b.id + '">Cancel</button>' +
           '</td></tr>';
       });
-      $('bookingsTable').innerHTML = html + '</table>';
+      $('bookingsTable').insertAdjacentHTML('beforeend', html + '</table>');
+      $('bookingsTable').querySelectorAll('[data-move]').forEach(function (btn) {
+        btn.addEventListener('click', function () { moveBookingId = btn.dataset.move; renderBookings(); });
+      });
       $('bookingsTable').querySelectorAll('[data-act]').forEach(function (btn) {
         btn.addEventListener('click', function () {
           B.setStatus(state, btn.dataset.id, btn.dataset.act);
@@ -580,6 +670,7 @@
     }
 
     renderWaitlist();
+    renderHud();
   }
 
   function findBooking(id) {
@@ -777,6 +868,7 @@
       });
     }
     renderStaffMatrix();
+    renderShStaffOptions();
   }
 
   $('staffAdd').addEventListener('click', function () {
@@ -825,6 +917,88 @@
     });
   }
 
+  // ---------- team hours (per-member working hours) ----------
+  function renderShStaffOptions() {
+    var sel = $('shStaff');
+    if (!sel) return;
+    var cur = sel.value;
+    var list = B.staffList(state);
+    sel.innerHTML = list.map(function (m) {
+      return '<option value="' + esc(m.id) + '">' + esc(m.name) + '</option>';
+    }).join('');
+    if (cur && list.some(function (m) { return m.id === cur; })) sel.value = cur;
+    renderShGrid();
+  }
+
+  function renderShGrid() {
+    var g = $('shGrid'), note = $('shNote');
+    if (!g) return;
+    var m = B.getStaffMember(state, $('shStaff').value);
+    if (!m) {
+      g.innerHTML = '<p class="muted">Add a team member first.</p>';
+      if (note) note.textContent = '';
+      return;
+    }
+    var custom = !!(m.hours && B.validStaffHours(m.hours));
+    if (note) note.textContent = custom
+      ? m.name + ' has custom hours below. Save to keep them — or press "Copy business hours" then Save to go back to business hours.'
+      : m.name + ' currently follows the business hours. Change any day and Save to set custom hours.';
+    var eff = B.staffHours(state, m.id);
+    g.innerHTML = '';
+    for (var d = 0; d < 7; d++) {
+      (function (day) {
+        var h = eff[day];
+        var box = document.createElement('div');
+        box.className = 'daybox';
+        box.innerHTML = '<div class="d">' + DAYS[day] + '</div>' +
+          '<label class="checkline"><input type="checkbox" data-sh-open="' + day + '"' + (h ? ' checked' : '') + '> Open</label>' +
+          '<div class="daybox-times">' +
+          '<input type="time" data-sh-from="' + day + '" value="' + (h ? to24(h[0]) : '09:00') + '" aria-label="Opens">' +
+          '<input type="time" data-sh-to="' + day + '" value="' + (h ? to24(h[1]) : '17:00') + '" aria-label="Closes">' +
+          '</div>';
+        g.appendChild(box);
+      })(d);
+    }
+  }
+
+  $('shStaff').addEventListener('change', renderShGrid);
+
+  $('shCopyBiz').addEventListener('click', function () {
+    for (var d = 0; d < 7; d++) {
+      var open = document.querySelector('[data-sh-open="' + d + '"]');
+      if (!open) return;
+      var h = state.hours[d];
+      open.checked = !!h;
+      document.querySelector('[data-sh-from="' + d + '"]').value = h ? to24(h[0]) : '09:00';
+      document.querySelector('[data-sh-to="' + d + '"]').value = h ? to24(h[1]) : '17:00';
+    }
+  });
+
+  $('shSave').addEventListener('click', function () {
+    var id = $('shStaff').value;
+    if (!id) { alert('Pick a team member first.'); return; }
+    var hours = {};
+    for (var d = 0; d < 7; d++) {
+      var open = document.querySelector('[data-sh-open="' + d + '"]').checked;
+      if (!open) { hours[d] = null; continue; }
+      var from = toMin(document.querySelector('[data-sh-from="' + d + '"]').value || '09:00');
+      var to = toMin(document.querySelector('[data-sh-to="' + d + '"]').value || '17:00');
+      if (to <= from) { alert(DAYS[d] + ': closing time must be after opening time.'); return; }
+      hours[d] = [from, to];
+    }
+    // Identical to business hours = no override worth storing.
+    var same = true;
+    for (var k = 0; k < 7; k++) {
+      var a = hours[k], bh = state.hours[k];
+      if (!a && !bh) continue;
+      if (!a || !bh || a[0] !== bh[0] || a[1] !== bh[1]) { same = false; break; }
+    }
+    var r = B.setStaffHours(state, id, same ? null : hours);
+    if (!r.ok) { alert(r.error); return; }
+    save(); renderShGrid(); renderBookingForm(); renderSchedule();
+    alert('Hours saved for ' + (B.getStaffMember(state, id) || {}).name + '.');
+  });
+
   function renderSchedStaffOptions() {
     var sel = $('schedStaff');
     if (!sel) return;
@@ -837,6 +1011,9 @@
     sel.value = cur;
   }
 
+  // Day schedule as a vertical time ruler with booking blocks, one column per
+  // team member (Square-style). Blocks are positioned by start time and sized
+  // by duration; cancelled/no-show/completed get muted treatments.
   function renderSchedule() {
     var host = $('schedView');
     if (!host) return;
@@ -855,20 +1032,48 @@
       groups = [{ name: label, rows: B.staffDaySchedule(state, date, f === 'all' ? null : f) }];
     }
     var anyRows = groups.some(function (g) { return g.rows.length; });
-    if (!anyRows) {
-      host.innerHTML = '<p class="muted">Nothing booked on ' + esc(B.fmtDate(date)) + '.</p>';
+    // Day span: union of the shop hours and every displayed member's hours.
+    var wd = B.weekdayOf(date);
+    var span = [1440, 0];
+    function consider(h) {
+      if (h && h[1] > h[0]) {
+        if (h[0] < span[0]) span[0] = h[0];
+        if (h[1] > span[1]) span[1] = h[1];
+      }
+    }
+    consider((state.hours || {})[wd]);
+    B.staffList(state).forEach(function (m) { consider((B.staffHours(state, m.id) || {})[wd]); });
+    if (span[1] <= span[0]) {
+      host.innerHTML = '<p class="muted">Closed on ' + esc(B.fmtDate(date)) + '.</p>';
       return;
     }
-    host.innerHTML = groups.filter(function (g) { return g.rows.length; }).map(function (g) {
-      var rows = g.rows.map(function (b) {
-        return '<tr><td>' + esc(B.fmtTime(b.start)) + ' – ' + esc(B.fmtTime(b.end)) + '</td>' +
-          '<td>' + esc(b.name) + '<br><span class="muted">' + esc(b.phone) + '</span></td>' +
-          '<td>' + esc(b.serviceName) + '</td>' +
-          '<td><span class="pill ' + b.status + '">' + b.status + '</span></td></tr>';
+    var ppm = 0.75; // px per minute → 45px per hour
+    var PAD = 10; // top breathing room so the first hour label isn't clipped
+    var H = Math.round((span[1] - span[0]) * ppm) + PAD;
+    var grid = '';
+    for (var t = span[0]; t <= span[1]; t += 60) {
+      var y = PAD + Math.round((t - span[0]) * ppm);
+      grid += '<div class="tl-gl" style="top:' + y + 'px"></div>' +
+        '<span class="tl-h" style="top:' + y + 'px">' + esc(B.fmtTime(t).replace(':00 ', ' ')) + '</span>';
+    }
+    var cols = groups.map(function (g) {
+      var blocks = g.rows.map(function (b) {
+        var top = PAD + Math.round((b.start - span[0]) * ppm);
+        var hgt = Math.max(30, Math.round((b.end - b.start) * ppm));
+        var st = b.status === 'confirmed' ? '' : ' st-' + b.status;
+        return '<div class="tl-block' + st + '" style="top:' + top + 'px;height:' + hgt + 'px" title="' +
+          esc(b.name + ' — ' + b.serviceName) + '">' +
+          '<div class="tl-bt">' + esc(B.fmtTime(b.start)) + ' – ' + esc(B.fmtTime(b.end)) + '</div>' +
+          '<div class="tl-bn">' + esc(b.name) + '</div>' +
+          '<div class="tl-bs">' + esc(b.serviceName) + '</div></div>';
       }).join('');
-      return '<h3 class="form-title">' + esc(g.name) + '</h3>' +
-        '<table><tr><th>Time</th><th>Customer</th><th>Service</th><th>Status</th></tr>' + rows + '</table>';
+      return '<div class="tl-col"><div class="tl-colhead">' + esc(g.name) + '</div>' +
+        '<div class="tl-track" style="height:' + H + 'px"><div class="tl-grid">' + grid + '</div>' +
+        blocks + '</div></div>';
     }).join('');
+    host.innerHTML =
+      (anyRows ? '' : '<p class="muted">Nothing booked on ' + esc(B.fmtDate(date)) + ' — the day is wide open.</p>') +
+      '<div class="tl"><div class="tl-cols">' + cols + '</div></div>';
   }
 
   $('schedToday').addEventListener('click', function () {
@@ -1050,13 +1255,88 @@
     renderBookingForm();
   });
 
+  // ---------- reschedule (customer self-service + owner "Move") ----------
+  // Slots for a reschedule target date, ignoring the booking being moved.
+  function reschedSlots(date, svc, staffId, ignoreId) {
+    var bk = state.bookings.filter(function (x) { return x.id !== ignoreId; });
+    var blocked = blockedDateList();
+    var base = { today: B.todayStr(), services: state.services, bookings: bk };
+    if (!B.staffList(state).length) {
+      return B.slotsFor(date, svc, state.hours, blocked, bk, base);
+    }
+    if (staffId) return B.slotsForStaff(date, svc, staffId, state, base);
+    var seen = {}, out = [];
+    B.eligibleStaff(state, svc).forEach(function (m) {
+      B.slotsForStaff(date, svc, m.id, state, base).forEach(function (t) {
+        if (!seen[t]) { seen[t] = true; out.push(t); }
+      });
+    });
+    return out.sort(function (a, b) { return a - b; });
+  }
+
+  // Inline move-booking panel. onDone(moved) re-renders the originating view.
+  function renderReschedulePanel(host, booking, onDone) {
+    var svc = B.getService(state.services, booking.serviceId);
+    if (!svc) { host.innerHTML = '<div class="warnbox">That service no longer exists.</div>'; return; }
+    var today = B.todayStr();
+    var withWhom = booking.staffId ? ' with ' + esc(staffName(booking.staffId)) : '';
+    host.innerHTML =
+      '<div class="resched">' +
+      '<h4>Move booking</h4>' +
+      '<p class="muted small">' + esc(booking.serviceName) + withWhom + ' for ' + esc(booking.name) +
+      ' — currently ' + esc(B.fmtDate(booking.date)) + ' at ' + esc(B.fmtTime(booking.start)) + '.</p>' +
+      '<div class="row"><div><label for="rsDate">New date</label>' +
+      '<input type="date" id="rsDate" min="' + today + '" value="' + esc(booking.date) + '"></div>' +
+      '<div><label for="rsSlot">New time</label><select id="rsSlot"></select></div></div>' +
+      '<div style="margin-top:12px"><button class="btn primary small" id="rsGo">Move booking</button> ' +
+      '<button class="btn ghost small" id="rsBack">Back</button></div>' +
+      '<div id="rsMsg" style="margin-top:10px"></div></div>';
+    function fillSlots() {
+      var d = $('rsDate').value;
+      var sel = $('rsSlot');
+      var slots = d ? reschedSlots(d, svc, booking.staffId, booking.id) : [];
+      sel.innerHTML = slots.length
+        ? slots.map(function (t) { return '<option value="' + t + '">' + B.fmtTime(t) + '</option>'; }).join('')
+        : '<option value="">No open times that day</option>';
+    }
+    $('rsDate').addEventListener('change', fillSlots);
+    fillSlots();
+    $('rsBack').addEventListener('click', function () { host.innerHTML = ''; onDone(false); });
+    $('rsGo').addEventListener('click', function () {
+      var msg = $('rsMsg');
+      var d = $('rsDate').value, t = parseInt($('rsSlot').value, 10);
+      if (!d || isNaN(t)) { msg.innerHTML = '<div class="warnbox">Pick a date and time first.</div>'; return; }
+      var r = B.rescheduleBooking(state, booking.id, d, t);
+      if (!r.ok) { msg.innerHTML = '<div class="warnbox">' + esc(r.error) + '</div>'; return; }
+      save();
+      host.innerHTML = '<div class="notice">Moved to ' + esc(B.fmtDate(d)) + ' at ' + esc(B.fmtTime(t)) + '.</div>';
+      onDone(true);
+    });
+  }
+
+  var lkReschedId = null;   // booking id with an open reschedule panel (lookup)
+  var moveBookingId = null; // booking id with an open "Move" panel (owner)
+
   // ---------- customer self-service lookup ----------
   function renderLookup() {
     var host = $('lkResults');
     var phone = $('lkPhone').value;
     var hits = B.findBookingsByPhone(state, phone);
+    host.innerHTML = '';
+    if (lkReschedId) {
+      var panel = document.createElement('div');
+      host.appendChild(panel);
+      var rb = findBooking(lkReschedId);
+      if (rb) {
+        renderReschedulePanel(panel, rb, function (moved) {
+          lkReschedId = null;
+          renderLookup();
+          if (moved) { renderBookings(); renderStats(); renderSvcRevenue(); renderBookingForm(); renderSchedule(); }
+        });
+      } else { lkReschedId = null; }
+    }
     if (!hits.length) {
-      host.innerHTML = '<p class="muted">No upcoming bookings found for that phone number. Check the number and try again.</p>';
+      host.insertAdjacentHTML('beforeend', '<p class="muted">No upcoming bookings found for that phone number. Check the number and try again.</p>');
       return;
     }
     var html = '<table><tr><th>When</th><th>Service</th><th>Ref</th><th>Status</th><th></th></tr>';
@@ -1065,9 +1345,22 @@
         '<td>' + esc(b.serviceName) + '<br><span class="muted">' + esc(b.name) + '</span></td>' +
         '<td><span class="refcode">' + esc(b.ref || B.bookingRef(b.id)) + '</span></td>' +
         '<td><span class="pill confirmed">confirmed</span></td>' +
-        '<td><button class="danger small" data-selfcancel="' + b.id + '">Cancel booking</button></td></tr>';
+        '<td><button class="ghost small" data-selfresched="' + b.id + '">Reschedule</button> ' +
+        '<button class="ghost small" data-selfics="' + b.id + '">.ics</button> ' +
+        '<button class="danger small" data-selfcancel="' + b.id + '">Cancel booking</button></td></tr>';
     });
-    host.innerHTML = html + '</table>';
+    host.insertAdjacentHTML('beforeend', html + '</table>');
+    host.querySelectorAll('[data-selfresched]').forEach(function (btn) {
+      btn.addEventListener('click', function () { lkReschedId = btn.dataset.selfresched; renderLookup(); });
+    });
+    host.querySelectorAll('[data-selfics]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var bk = findBooking(btn.dataset.selfics);
+        if (!bk) return;
+        downloadFile('bookpilot-booking-' + (bk.ref || B.bookingRef(bk.id)) + '.ics',
+          B.bookingToICS(bk, state.bizName, staffName(bk.staffId)), 'text/calendar');
+      });
+    });
     host.querySelectorAll('[data-selfcancel]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         if (!confirm('Cancel this booking? The business owner will be notified.')) return;

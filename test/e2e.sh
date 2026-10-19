@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# BookPilot AI end-to-end tests — 13 flows exercised in Node against js/logic.js.
+# BookPilot AI end-to-end tests — flows exercised in Node against js/logic.js.
 set -u
 cd "$(dirname "$0")/.."
 
@@ -249,6 +249,52 @@ const badImp = B.importStore('not json at all');
   impPay23.state.services[0].staffIds.length === 2 && !badImp.ok)
   ? ok('flow23: export/import + QR payload preserve staff links; garbage rejected')
   : bad('flow23');
+
+// Flow 25: customer reschedules — old slot frees, new slot consumes, conflicts rejected
+st = fresh();
+const rita = B.bookSlot(st, { serviceId: 's1', date: '2026-10-20', start: 540, name: 'Rita', phone: '555-9' }).booking;
+B.markReminded(st, rita.id);
+const mv = B.rescheduleBooking(st, rita.id, '2026-10-21', 720);
+const selfHits = B.findBookingsByPhone(st, '555-9');
+const freed25 = B.slotsFor('2026-10-20', svc, st.hours, [], st.bookings, { today: '2026-10-19', nowMin: 0 });
+(mv.ok && mv.booking.date === '2026-10-21' && mv.booking.start === 720 &&
+  selfHits.length === 1 && selfHits[0].date === '2026-10-21' &&
+  freed25.indexOf(540) !== -1 && mv.booking.reminded === false)
+  ? ok('flow25: reschedule moves booking; lookup follows; old slot freed; reminder reset')
+  : bad('flow25');
+const clash25 = B.bookSlot(st, { serviceId: 's1', date: '2026-10-22', start: 600, name: 'Zed', phone: '555-0' });
+const mvBad = B.rescheduleBooking(st, rita.id, '2026-10-22', 600);
+(!clash25.ok === false && !mvBad.ok && /taken/.test(mvBad.error) && rita.date === '2026-10-21')
+  ? ok('flow25b: reschedule into a taken slot rejected; original kept')
+  : bad('flow25b');
+
+// Flow 26: per-staff hours — part-timer shows restricted availability everywhere it matters
+st = fresh();
+B.addStaffMember(st, 'Maya');
+B.addStaffMember(st, 'Leo');
+const maya26 = st.staff[0], leo26 = st.staff[1];
+B.setServiceStaff(st, 's1', [maya26.id, leo26.id]);
+B.setStaffHours(st, maya26.id, { 0: null, 1: [720, 1020], 2: [720, 1020], 3: [720, 1020], 4: [720, 1020], 5: [720, 1020], 6: null }); // afternoons only
+const base26 = { today: '2026-10-19', nowMin: 0, services: st.services };
+const mayaSlots = B.slotsForStaff('2026-10-20', svc, maya26.id, st, base26);
+const leoSlots = B.slotsForStaff('2026-10-20', svc, leo26.id, st, base26);
+const fa26 = B.firstAvailable(st, svc, '2026-10-20', base26);
+(mayaSlots.length === 10 && mayaSlots[0] === 720 && leoSlots.length === 16 &&
+  fa26 && fa26.staffId === leo26.id && fa26.start === 540)
+  ? ok('flow26: Maya afternoons-only (10 slots); Leo full day; first-available picks Leo at 9:00')
+  : bad('flow26 maya=' + mayaSlots.length + ' leo=' + leoSlots.length + ' fa=' + JSON.stringify(fa26));
+
+// Flow 27: .ics download content — stable UID, local times, customer-safe fields
+st = fresh();
+const ib = B.bookSlot(st, { serviceId: 's1', date: '2026-10-21', start: 780, name: 'Ivy', phone: '555-7', notes: 'line1\nline2' }).booking;
+const ics = B.bookingToICS(ib, 'Main Street Salon', '');
+(ics.indexOf('DTSTART:20261021T130000') !== -1 && ics.indexOf('DTEND:20261021T133000') !== -1 &&
+  ics.indexOf('UID:' + ib.id + '@bookpilot-ai') !== -1 &&
+  ics.indexOf('SUMMARY:Cut — Main Street Salon') !== -1 &&
+  ics.indexOf('DESCRIPTION:Booking ref ' + ib.ref + '\\nNotes: line1\\nline2') !== -1 &&
+  ics.indexOf('\r\n') !== -1)
+  ? ok('flow27: ICS has UID, local DTSTART/DTEND, summary, escaped multi-line description')
+  : bad('flow27');
 
 // Flow 24: ntfy digest and reminder message carry the staff name; email flows into CSV
 st = fresh();

@@ -25,6 +25,9 @@ A single static page with two faces: a **customer booking widget** (service → 
 12. **Multi-device sync** — everything lives in this browser's localStorage. Move it with a backup file (export/import, with automatic pre-import backup) or a **QR code transfer**: the Sync tab encodes the whole store into a QR code (compressed when the browser supports it); scan it with any QR reader app on the other device, copy the text, paste it into the Import box there. Large histories should use the backup file — QR codes hold a few thousand characters.
 13. **Multi-staff calendars** — team roster, per-service "who performs what" assignment, per-staff slot availability in the booking widget ("first available" matches the earliest free qualified person), staff filter on the bookings board, and a per-day/per-person schedule view. This works on one shared device (front-desk tablet / shop computer).
 14. **Customer email (optional)** — bookings can carry an email address; it flows into the CSV export and powers the Gmail reminder tool above.
+15. **Add to calendar (.ics)** — the confirmation ticket and the self-service lookup offer a one-click `.ics` download, generated entirely client-side (no service, no account) — the appointment lands in the customer's phone calendar instead of evaporating when they close the tab.
+16. **Reschedule, not just cancel** — customers can move an upcoming booking from "Find my bookings" (date + time picker honoring the booking's service and team member); owners get a "Move" action on every ledger row. Moved bookings use the exact same validation as new ones (blocked/closed/hours/conflicts) and reset their reminder flag.
+17. **Per-staff working hours** — optional per-day open/close times per team member (Team tab → Team hours); the slot engine honors them automatically, including "first available" matching. Unset = business hours, so part-timers stop showing as bookable at times they never work.
 
 ## Pricing vision
 Free forever for one location, including multi-staff calendars and all notification channels above · **$19/mo Pro** (online deposits, review-request automation) · $49/mo Multi-location.
@@ -44,8 +47,8 @@ Append `?embed=1` for the customer-only widget view.
 
 ## Tests
 ```bash
-bash test/smoke.sh   # 74 checks: files, syntax, slots, booking, blocked dates, reminders, stats, embed, staff, sync, QR, notifications, gmail tool
-bash test/e2e.sh     # 27 end-to-end flows in Node against js/logic.js
+bash test/smoke.sh   # 90 checks: files, syntax, slots, booking, blocked dates, reminders, stats, embed, staff, sync, QR, notifications, gmail tool, reschedule, ICS, staff hours, v2 design rules
+bash test/e2e.sh     # 31 end-to-end flows in Node against js/logic.js
 ```
 
 ## Multi-device sync flow

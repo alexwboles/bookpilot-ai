@@ -19,6 +19,12 @@
       <span class="brand-name">BookPilot <em>AI</em></span>
     </div>
     <p class="mast-sub">Online booking for local service businesses. No accounts, no monthly fees — your calendar lives in your browser.</p>
+    <div class="hud" id="hud">
+      <p class="hud-k">Today at a glance</p>
+      <p class="hud-date" id="hudDate"></p>
+      <p class="hud-row" id="hudToday"></p>
+      <p class="hud-row hud-next" id="hudNext"></p>
+    </div>
     <nav class="tabs" id="mainTabs" aria-label="Sections">
       <button data-tab="book" class="active">Book online</button>
       <button data-tab="bookings">Bookings</button>
@@ -52,6 +58,7 @@
           <h2 id="bookBizName">Your business</h2>
           <p class="sub">Three steps, under a minute. Instant confirmation — no phone tag.</p>
           <div id="svcSummary" class="svc-summary"></div>
+          <div id="apptTicket" class="appt-ticket" aria-live="polite"></div>
           <div class="book-legend">
             <p><strong>How booking works</strong></p>
             <ol>
@@ -67,19 +74,23 @@
             <li class="step" data-step="2"><span class="step-n">2</span> Time</li>
             <li class="step" data-step="3"><span class="step-n">3</span> Your details</li>
           </ol>
-          <label for="bkService">Service</label>
-          <select id="bkService"></select>
-          <div id="svcCards" class="svc-cards"></div>
-          <div class="cal-head">
-            <button type="button" class="ghost small" id="calPrev" aria-label="Previous month">←</button>
-            <span id="calTitle" class="cal-title"></span>
-            <button type="button" class="ghost small" id="calNext" aria-label="Next month">→</button>
-          </div>
-          <div id="calGrid" class="cal-grid" role="grid" aria-label="Availability calendar"></div>
-          <input type="date" id="bkDate" style="display:none" aria-hidden="true" tabindex="-1">
-          <button type="button" class="ghost small" id="bkNextAvail" style="margin-top:10px">Find next available →</button>
-          <div id="slotWrap" class="slot-panel"></div>
-          <div id="bkForm" style="display:none">
+          <div class="book-cols">
+            <div class="book-col-cal">
+              <label for="bkService">Service</label>
+              <select id="bkService"></select>
+              <div id="svcCards" class="svc-cards"></div>
+              <div class="cal-head">
+                <button type="button" class="ghost small" id="calPrev" aria-label="Previous month">←</button>
+                <span id="calTitle" class="cal-title"></span>
+                <button type="button" class="ghost small" id="calNext" aria-label="Next month">→</button>
+              </div>
+              <div id="calGrid" class="cal-grid" role="grid" aria-label="Availability calendar"></div>
+              <input type="date" id="bkDate" style="display:none" aria-hidden="true" tabindex="-1">
+              <button type="button" class="ghost small" id="bkNextAvail" style="margin-top:10px">Find next available →</button>
+            </div>
+            <div class="book-col-slots">
+              <div id="slotWrap" class="slot-panel"></div>
+              <div id="bkForm" style="display:none">
             <div class="row">
               <div><label for="bkName">Your name</label><input type="text" id="bkName" placeholder="Jane Doe" autocomplete="name"></div>
               <div><label for="bkPhone">Phone</label><input type="tel" id="bkPhone" placeholder="555-123-4567" autocomplete="tel"></div>
@@ -94,6 +105,8 @@
               <span class="fineprint">You'll get a reminder the day before.</span></div>
           </div>
           <div id="bkResult" style="margin-top:14px"></div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -237,6 +250,22 @@
       <h2>Who performs what</h2>
       <p class="sub">Tick the team members who perform each service. Services with nobody ticked can be booked with anyone. "First available" matches the customer to the earliest free qualified person.</p>
       <div id="staffMatrix"></div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <p class="kicker">Schedules</p>
+          <h2>Team hours</h2>
+          <p class="sub">Optional: give a team member their own working hours. When set, the booking calendar uses these instead of the business hours. Untouched members keep the business hours.</p>
+        </div>
+      </div>
+      <div class="row" style="grid-template-columns: 1fr auto; align-items:end">
+        <div><label for="shStaff">Team member</label><select id="shStaff"></select></div>
+        <div><button class="btn ghost" id="shCopyBiz">Copy business hours</button></div>
+      </div>
+      <p class="muted small" id="shNote" style="margin-top:8px"></p>
+      <div class="hoursgrid" id="shGrid" style="margin-top:10px"></div>
+      <div style="margin-top:14px"><button class="btn primary" id="shSave">Save team member hours</button></div>
     </div>
     <div class="card">
       <div class="card-head">
